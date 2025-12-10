@@ -1,0 +1,5 @@
+export const CONTRACTS = {
+  identityRegistry: "0x5738932150BD02411dD5346842Dfa45d56F6A83c",
+  kycRequestRegistry: "0x4c19abcF3Cb6525F24c61582E4B2f3f70fe4FE6c",
+  tokenFactory: "0x7Ed9C218C6E9Fd27f804277A01ed16816e148F60",
+};
