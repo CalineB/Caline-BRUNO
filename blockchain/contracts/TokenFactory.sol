@@ -5,12 +5,13 @@ import "./Ownable.sol";
 import "./IdentityRegistry.sol";
 import "./HouseSecurityToken.sol";
 
-// Crée un token de sécurité par maison / projet
 contract TokenFactory is Ownable {
     address public immutable identityRegistry;
 
-    address[] public allHouseTokens;
+    // 🔥 AJOUT : on mémorise l'adresse de la SaleFactory
+    address public saleFactory;
 
+    address[] public allHouseTokens;
     mapping(address => address[]) public tokensByProjectOwner;
 
     event HouseTokenCreated(
@@ -21,11 +22,20 @@ contract TokenFactory is Ownable {
         uint256 maxSupply
     );
 
+    event SaleFactoryUpdated(address indexed oldFactory, address indexed newFactory);
+
     constructor(address platformOwner, address _identityRegistry)
         Ownable(platformOwner)
     {
         require(_identityRegistry != address(0), "Factory: identityRegistry zero");
         identityRegistry = _identityRegistry;
+    }
+
+    // 🔥 AJOUT : l’owner de la factory (platform) configure une fois l'adresse de SaleFactory
+    function setSaleFactory(address _saleFactory) external onlyOwner {
+        require(_saleFactory != address(0), "Factory: saleFactory zero");
+        emit SaleFactoryUpdated(saleFactory, _saleFactory);
+        saleFactory = _saleFactory;
     }
 
     function createHouseToken(
@@ -38,7 +48,6 @@ contract TokenFactory is Ownable {
         require(bytes(symbol).length > 0, "Factory: symbol empty");
         require(projectOwner != address(0), "Factory: projectOwner zero");
 
-        // Déploiement du token pour ce projet
         HouseSecurityToken token = new HouseSecurityToken(
             owner,
             projectOwner,
@@ -50,8 +59,12 @@ contract TokenFactory is Ownable {
 
         tokenAddress = address(token);
 
-        allHouseTokens.push(tokenAddress);
+        // ✅ ici : on dit au token "ta saleFactory c'est X"
+        if (saleFactory != address(0)) {
+            token.setSaleFactory(saleFactory);
+        }
 
+        allHouseTokens.push(tokenAddress);
         tokensByProjectOwner[projectOwner].push(tokenAddress);
 
         emit HouseTokenCreated(tokenAddress, projectOwner, name, symbol, maxSupply);

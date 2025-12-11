@@ -1,3 +1,4 @@
+// src/pages/Admin.jsx
 import React, { useEffect, useState } from "react";
 import {
   useAccount,
@@ -13,14 +14,11 @@ import IdentityJSON from "../abis/IdentityRegistry.json";
 import KYCJSON from "../abis/KYCRequestRegistry.json";
 import TokenFactoryJSON from "../abis/TokenFactory.json";
 import HouseTokenJSON from "../abis/HouseSecurityToken.json";
-import SaleFactoryJSON from "../abis/SaleFactory.json";
-import { parseEther } from "viem";
 
 const IdentityABI = IdentityJSON.abi;
 const KYCABI = KYCJSON.abi;
 const TokenFactoryABI = TokenFactoryJSON.abi;
 const HouseTokenABI = HouseTokenJSON.abi;
-const SaleFactoryABI = SaleFactoryJSON.abi;
 
 function isValidAddress(addr) {
   return typeof addr === "string" && addr.startsWith("0x") && addr.length === 42;
@@ -283,6 +281,9 @@ export default function Admin() {
     sqm: "",
     yield: "",
     description: "",
+    spvName: "",
+    spvRegistration: "",
+    spvContractNumber: "",
   });
   const [imageDataUrl, setImageDataUrl] = useState("");
 
@@ -320,6 +321,9 @@ export default function Admin() {
       sqm,
       yield: yieldPct,
       description,
+      spvName,
+      spvRegistration,
+      spvContractNumber,
     } = newTokenForm;
 
     if (!name || !symbol || !maxSupply || !isValidAddress(projectOwner)) {
@@ -329,13 +333,25 @@ export default function Admin() {
       return;
     }
 
+    let maxSupplyBigInt;
+    try {
+      maxSupplyBigInt = BigInt(maxSupply);
+      if (maxSupplyBigInt <= 0n) {
+        alert("MaxSupply doit être > 0.");
+        return;
+      }
+    } catch {
+      alert("MaxSupply invalide.");
+      return;
+    }
+
     try {
       // 1) création du token on-chain
       await writeContract({
         address: CONTRACTS.tokenFactory,
         abi: TokenFactoryABI,
         functionName: "createHouseToken",
-        args: [name, symbol, BigInt(maxSupply), projectOwner],
+        args: [name, symbol, maxSupplyBigInt, projectOwner],
       });
 
       // 2) récupérer le dernier token
@@ -369,8 +385,11 @@ export default function Admin() {
         yield: yieldPct,
         description,
         imageDataUrl: imageDataUrl || null,
-        published: true, // publié par défaut dans le market
-        projectOwner,    // pour la création de sale auto
+        published: true,
+        projectOwner,
+        spvName,
+        spvRegistration,
+        spvContractNumber,
       };
 
       savePropertyMeta(metaCopy);
@@ -390,6 +409,9 @@ export default function Admin() {
         sqm: "",
         yield: "",
         description: "",
+        spvName: "",
+        spvRegistration: "",
+        spvContractNumber: "",
       });
       setImageDataUrl("");
 
@@ -397,34 +419,6 @@ export default function Admin() {
     } catch (err) {
       console.error(err);
       alert(err?.shortMessage || err?.message || "Erreur createHouseToken");
-    }
-  }
-
-  // ------- Création auto du contrat de vente -------
-
-  async function handleCreateSaleForToken(tokenAddr, projectOwner) {
-    const priceEth = salePriceInputs[tokenAddr];
-
-    if (!priceEth || Number(priceEth) <= 0) {
-      alert("Merci de renseigner un prix par token en ETH (ex : 0.05).");
-      return;
-    }
-
-    try {
-      const priceWei = parseEther(priceEth); // string -> bigint
-
-      await writeContract({
-        address: CONTRACTS.saleFactory,
-        abi: SaleFactoryABI,
-        functionName: "createSaleForToken",
-        args: [tokenAddr, projectOwner, priceWei],
-      });
-
-      alert("Contrat de vente HouseEthSale créé et lié au token.");
-      setReloadFlag((x) => x + 1);
-    } catch (err) {
-      console.error(err);
-      alert(err?.shortMessage || err?.message || "Erreur createSaleForToken");
     }
   }
 
@@ -526,6 +520,9 @@ export default function Admin() {
       imageDataUrl: null,
       published: false,
       projectOwner: "",
+      spvName: "",
+      spvRegistration: "",
+      spvContractNumber: "",
     };
   }
 
@@ -562,16 +559,9 @@ export default function Admin() {
     updatePropertyField(tokenAddr, "published", published);
   }
 
-  // ------- Etat pour prix par token (sale) -------
-  const [salePriceInputs, setSalePriceInputs] = useState({});
-
-  function updateSalePriceInput(tokenAddr, value) {
-    setSalePriceInputs((prev) => ({ ...prev, [tokenAddr]: value }));
-  }
-
   // ------- Actions token on-chain : pause / unpause / burn -------
 
-  const [burnInputs, setBurnInputs] = useState({});
+  const [burnInputs, setBurnInputs] = useState({}); // tokenAddr -> { from, amount }
 
   async function handlePauseToken(tokenAddr) {
     try {
@@ -990,6 +980,35 @@ export default function Admin() {
             />
           </div>
 
+          <h3>Informations SPV</h3>
+          <div>
+            <label>Nom légal de la SPV</label>
+            <input
+              name="spvName"
+              value={newTokenForm.spvName}
+              onChange={updateNewTokenField}
+              placeholder="SPV Maison Les Abymes SAS"
+            />
+          </div>
+          <div>
+            <label>Immatriculation (ex : RCS ...)</label>
+            <input
+              name="spvRegistration"
+              value={newTokenForm.spvRegistration}
+              onChange={updateNewTokenField}
+              placeholder="RCS 123 456 789"
+            />
+          </div>
+          <div>
+            <label>Numéro de contrat / référence bancaire</label>
+            <input
+              name="spvContractNumber"
+              value={newTokenForm.spvContractNumber}
+              onChange={updateNewTokenField}
+              placeholder="CONTRAT-2025-001"
+            />
+          </div>
+
           <h3>Infos du bien (front uniquement)</h3>
           <div>
             <label>Adresse du bien</label>
@@ -1040,7 +1059,7 @@ export default function Admin() {
           </div>
           <div style={{ display: "flex", gap: "0.5rem" }}>
             <div style={{ flex: 1 }}>
-              <label>Nombre de pièces</label>
+              <label>Nombre d'obligations à vendre</label>
               <input
                 name="rooms"
                 type="number"
@@ -1175,6 +1194,54 @@ export default function Admin() {
                     Infos du bien (front uniquement):
                   </p>
 
+                  {/* SPV */}
+                  <div style={{ marginBottom: "0.25rem" }}>
+                    <label>Nom légal de la SPV</label>
+                    <input
+                      style={{ width: "100%" }}
+                      value={meta.spvName || ""}
+                      onChange={(e) =>
+                        updatePropertyField(
+                          t.address,
+                          "spvName",
+                          e.target.value
+                        )
+                      }
+                      disabled={metaDisabled}
+                    />
+                  </div>
+                  <div style={{ marginBottom: "0.25rem" }}>
+                    <label>Immatriculation (RCS, etc.)</label>
+                    <input
+                      style={{ width: "100%" }}
+                      value={meta.spvRegistration || ""}
+                      onChange={(e) =>
+                        updatePropertyField(
+                          t.address,
+                          "spvRegistration",
+                          e.target.value
+                        )
+                      }
+                      disabled={metaDisabled}
+                    />
+                  </div>
+                  <div style={{ marginBottom: "0.25rem" }}>
+                    <label>Numéro de contrat / référence</label>
+                    <input
+                      style={{ width: "100%" }}
+                      value={meta.spvContractNumber || ""}
+                      onChange={(e) =>
+                        updatePropertyField(
+                          t.address,
+                          "spvContractNumber",
+                          e.target.value
+                        )
+                      }
+                      disabled={metaDisabled}
+                    />
+                  </div>
+
+                  {/* Adresse du bien */}
                   <div style={{ marginBottom: "0.25rem" }}>
                     <label>Adresse du bien</label>
                     <input
@@ -1261,7 +1328,7 @@ export default function Admin() {
 
                   <div style={{ display: "flex", gap: "0.5rem" }}>
                     <div style={{ flex: 1 }}>
-                      <label>Pièces</label>
+                      <label>Nombre d'obligations</label>
                       <input
                         style={{ width: "100%" }}
                         type="number"
@@ -1354,7 +1421,7 @@ export default function Admin() {
                   </button>
                 </div>
 
-                {/* Gestion du contrat de vente */}
+                {/* Gestion du contrat de vente - manuel */}
                 <div style={{ marginTop: "0.75rem" }}>
                   <p>
                     Contrat de vente lié :{" "}
@@ -1363,67 +1430,32 @@ export default function Admin() {
                     </code>
                   </p>
 
-                  {!isLinked && (
-                    <div style={{ marginTop: "0.75rem" }}>
-                      <h4>Contrat de vente (HouseEthSale)</h4>
-                      <p style={{ fontSize: "0.9rem" }}>
-                        Ce token n&apos;a pas encore de contrat de vente. Tu peux en créer un
-                        automatiquement (déploiement + liaison).
-                      </p>
-
-                      <label>Prix par token (en ETH)</label>
-                      <input
-                        style={{ width: "100%", marginBottom: "0.25rem" }}
-                        placeholder="Ex : 0.05"
-                        type="number"
-                        step="0.0001"
-                        value={salePriceInputs[t.address] || ""}
-                        onChange={(e) => updateSalePriceInput(t.address, e.target.value)}
-                      />
-
-                      <button
-                        onClick={() =>
-                          handleCreateSaleForToken(
-                            t.address,
-                            meta.projectOwner || address
-                          )
-                        }
-                      >
-                        🏷️ Créer automatiquement le contrat de vente
-                      </button>
-                    </div>
+                  {!editSaleMode[t.address] && (
+                    <button
+                      style={{ marginTop: "0.25rem" }}
+                      onClick={() => toggleEditSale(t.address)}
+                    >
+                      ✏️ Lier / modifier l&apos;adresse du contrat HouseEthSale
+                    </button>
                   )}
 
-                  {isLinked && (
+                  {editSaleMode[t.address] && (
                     <>
-                      {!editSaleMode[t.address] && (
-                        <button
-                          style={{ marginTop: "0.25rem" }}
-                          onClick={() => toggleEditSale(t.address)}
-                        >
-                          ✏️ Modifier l&apos;adresse du contrat HouseEthSale
-                        </button>
-                      )}
-
-                      {editSaleMode[t.address] && (
-                        <>
-                          <label>Nouvelle adresse HouseEthSale</label>
-                          <input
-                            style={{ width: "100%" }}
-                            value={saleInputs[t.address] || ""}
-                            onChange={(e) =>
-                              updateSaleInput(t.address, e.target.value)
-                            }
-                            placeholder="0x..."
-                          />
-                          <button
-                            style={{ marginTop: "0.25rem" }}
-                            onClick={() => handleSetSaleContract(t.address)}
-                          >
-                            💾 Enregistrer la nouvelle adresse
-                          </button>
-                        </>
-                      )}
+                      <label>Adresse HouseEthSale</label>
+                      <input
+                        style={{ width: "100%" }}
+                        value={saleInputs[t.address] || ""}
+                        onChange={(e) =>
+                          updateSaleInput(t.address, e.target.value)
+                        }
+                        placeholder="0x..."
+                      />
+                      <button
+                        style={{ marginTop: "0.25rem" }}
+                        onClick={() => handleSetSaleContract(t.address)}
+                      >
+                        💾 Enregistrer l&apos;adresse du contrat de vente
+                      </button>
                     </>
                   )}
                 </div>

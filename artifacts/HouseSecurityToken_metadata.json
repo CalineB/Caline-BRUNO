@@ -136,6 +136,25 @@
 					{
 						"indexed": true,
 						"internalType": "address",
+						"name": "oldFactory",
+						"type": "address"
+					},
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "newFactory",
+						"type": "address"
+					}
+				],
+				"name": "SaleFactoryUpdated",
+				"type": "event"
+			},
+			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "address",
 						"name": "from",
 						"type": "address"
 					},
@@ -361,6 +380,19 @@
 				"type": "function"
 			},
 			{
+				"inputs": [],
+				"name": "saleFactory",
+				"outputs": [
+					{
+						"internalType": "address",
+						"name": "",
+						"type": "address"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
 				"inputs": [
 					{
 						"internalType": "address",
@@ -369,6 +401,19 @@
 					}
 				],
 				"name": "setSaleContract",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address",
+						"name": "_saleFactory",
+						"type": "address"
+					}
+				],
+				"name": "setSaleFactory",
 				"outputs": [],
 				"stateMutability": "nonpayable",
 				"type": "function"
@@ -472,11 +517,11 @@
 	},
 	"sources": {
 		"blockchain/contracts/HouseSecurityToken.sol": {
-			"keccak256": "0x5334175938716e16d3423c0680a0776241af7f027e3346f79c33db113cddda6a",
+			"keccak256": "0x56ac7528f65bc185d375aef54418938388a494da7c3100d0aa63dfa66e6b6c0f",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://88a8e2142ae23c45ee7859dbe18efcafc068d33e0782cd1e844e9a7c8e2fc25e",
-				"dweb:/ipfs/QmXFxamSg8tssToPVDHSU5uetGUy2twz1wsBCttvmXbFMw"
+				"bzz-raw://69057302c6f4103a2b736d995431f691a7e3103fa15246ade2976b369f0bbd25",
+				"dweb:/ipfs/QmUDFQEkTZdHVJ28JxrWSHDVWtcaX4j8caF7hBxcBioKa2"
 			]
 		},
 		"blockchain/contracts/IdentityRegistry.sol": {

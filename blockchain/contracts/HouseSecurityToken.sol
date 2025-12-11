@@ -22,8 +22,7 @@ contract HouseSecurityToken is Ownable {
     address public projectOwner;
     address public factory;
     address public saleContract;
-    address public saleFactory; // 🔥 AJOUT : adresse de la SaleFactory autorisée
-
+    address public saleFactory;
     // KYC registry
     IIdentityRegistry public identityRegistry;
 
@@ -55,7 +54,6 @@ contract HouseSecurityToken is Ownable {
         _;
     }
 
-    // 🔥 AJOUT : owner OU saleFactory peuvent faire certaines actions (setSaleContract)
     modifier onlyOwnerOrSaleFactory() {
         require(
             msg.sender == owner || msg.sender == saleFactory,
@@ -84,7 +82,6 @@ contract HouseSecurityToken is Ownable {
         factory = msg.sender; // la factory est le déployeur
     }
 
-    // 🔥 AJOUT : l’owner autorise une SaleFactory
     function setSaleFactory(address _saleFactory) external onlyOwner {
         require(_saleFactory != address(0), "Token: saleFactory zero");
         emit SaleFactoryUpdated(saleFactory, _saleFactory);

@@ -1,3 +1,4 @@
+// src/pages/HouseDetail.jsx
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useAccount, useWriteContract } from "wagmi";
@@ -33,9 +34,7 @@ export default function HouseDetail() {
   // Charger les métadonnées front depuis localStorage
   useEffect(() => {
     try {
-      const allMeta = JSON.parse(
-        localStorage.getItem("propertyMeta") || "{}"
-      );
+      const allMeta = JSON.parse(localStorage.getItem("propertyMeta") || "{}");
       const m =
         allMeta[tokenAddress?.toLowerCase()] || allMeta[tokenAddress] || null;
       setMeta(m || null);
@@ -44,7 +43,7 @@ export default function HouseDetail() {
     }
   }, [tokenAddress]);
 
-  // Charger infos du token + adresse du contrat de vente
+  // Charger infos du token + adresse du contrat de vente + projectOwner
   useEffect(() => {
     if (!tokenAddress) return;
 
@@ -52,7 +51,7 @@ export default function HouseDetail() {
       try {
         setLoading(true);
 
-        const [name, symbol, totalSupply, maxSupply, saleContract] =
+        const [name, symbol, totalSupply, maxSupply, saleContract, projectOwner] =
           await Promise.all([
             readContract(config, {
               address: tokenAddress,
@@ -79,6 +78,11 @@ export default function HouseDetail() {
               abi: HouseTokenABI,
               functionName: "saleContract",
             }),
+            readContract(config, {
+              address: tokenAddress,
+              abi: HouseTokenABI,
+              functionName: "projectOwner",
+            }),
           ]);
 
         const ts = BigInt(totalSupply ?? 0n);
@@ -92,6 +96,7 @@ export default function HouseDetail() {
           maxSupply: ms,
           progress,
           saleContract,
+          projectOwner,
         });
       } catch (err) {
         console.error("Erreur load token:", err);
@@ -158,7 +163,6 @@ export default function HouseDetail() {
         functionName: "buyTokens",
         args: [],
         value: parseEther(ethAmount),
-        gas: 500000n,
       });
 
       setTxHash(typeof tx === "string" ? tx : tx?.hash ?? JSON.stringify(tx));
@@ -169,15 +173,24 @@ export default function HouseDetail() {
     }
   }
 
-
   if (loading || !tokenInfo) {
     return <p>Chargement du bien...</p>;
   }
 
-  const images = meta?.images || [];
+  // Gestion images : compatibilité imageDataUrl (Admin) + images[]
+  const imagesArray = (() => {
+    if (meta?.images && Array.isArray(meta.images) && meta.images.length > 0) {
+      return meta.images;
+    }
+    if (meta?.imageDataUrl) {
+      return [meta.imageDataUrl];
+    }
+    return [];
+  })();
+
   const mainImage =
-    images.length > 0
-      ? images[currentImageIndex] || images[0]
+    imagesArray.length > 0
+      ? imagesArray[currentImageIndex] || imagesArray[0]
       : null;
 
   return (
@@ -216,7 +229,7 @@ export default function HouseDetail() {
         )}
 
         {/* Mini-galerie */}
-        {images.length > 1 && (
+        {imagesArray.length > 1 && (
           <div
             style={{
               display: "flex",
@@ -225,13 +238,16 @@ export default function HouseDetail() {
               paddingBottom: "0.25rem",
             }}
           >
-            {images.map((img, idx) => (
+            {imagesArray.map((img, idx) => (
               <button
                 key={idx}
                 type="button"
                 onClick={() => setCurrentImageIndex(idx)}
                 style={{
-                  border: idx === currentImageIndex ? "2px solid #4caf50" : "1px solid #ccc",
+                  border:
+                    idx === currentImageIndex
+                      ? "2px solid #4caf50"
+                      : "1px solid #ccc",
                   padding: 0,
                   borderRadius: 8,
                   overflow: "hidden",
@@ -282,7 +298,7 @@ export default function HouseDetail() {
                 )}
                 {meta.rooms && (
                   <>
-                    <strong>Pièces :</strong> {meta.rooms}
+                    <strong>Nombre d'obligations :</strong> {meta.rooms}
                   </>
                 )}
               </p>
@@ -293,6 +309,48 @@ export default function HouseDetail() {
               )}
               {meta.description && (
                 <p style={{ marginTop: "0.5rem" }}>{meta.description}</p>
+              )}
+
+              {/* Bloc SPV */}
+              {(meta.spvName ||
+                meta.spvRegistration ||
+                meta.spvContractNumber ||
+                tokenInfo.projectOwner) && (
+                <div
+                  style={{
+                    marginTop: "1rem",
+                    padding: "0.75rem",
+                    borderRadius: 8,
+                    border: "1px solid #eee",
+                    background: "#fafafa",
+                    fontSize: "0.9rem",
+                  }}
+                >
+                  <h3 style={{ marginTop: 0 }}>SPV porteuse du bien</h3>
+                  {meta.spvName && (
+                    <p>
+                      <strong>Nom légal :</strong> {meta.spvName}
+                    </p>
+                  )}
+                  {meta.spvRegistration && (
+                    <p>
+                      <strong>Immatriculation :</strong>{" "}
+                      {meta.spvRegistration}
+                    </p>
+                  )}
+                  {meta.spvContractNumber && (
+                    <p>
+                      <strong>N° de contrat :</strong>{" "}
+                      {meta.spvContractNumber}
+                    </p>
+                  )}
+                  {tokenInfo.projectOwner && (
+                    <p>
+                      <strong>Adresse de la SPV (wallet) :</strong>{" "}
+                      <code>{tokenInfo.projectOwner}</code>
+                    </p>
+                  )}
+                </div>
               )}
             </>
           )}
@@ -312,8 +370,14 @@ export default function HouseDetail() {
         <p style={{ fontSize: "0.9rem" }}>
           Adresse du token : <code>{tokenAddress}</code>
         </p>
+        {tokenInfo.projectOwner && (
+          <p style={{ fontSize: "0.9rem" }}>
+            SPV (wallet) : <code>{tokenInfo.projectOwner}</code>
+          </p>
+        )}
         <p style={{ fontSize: "0.9rem" }}>
-          Supply : {String(tokenInfo.totalSupply)} / {String(tokenInfo.maxSupply)} tokens
+          Supply : {String(tokenInfo.totalSupply)} /{" "}
+          {String(tokenInfo.maxSupply)} tokens
         </p>
 
         <div
@@ -355,35 +419,51 @@ export default function HouseDetail() {
           </p>
         )}
 
-        {isConnected && kycVerified && !tokenInfo.saleContract && (
-          <p style={{ color: "#d32f2f" }}>
-            Ce bien n&apos;a pas encore de contrat de vente configuré
-            (HouseEthSale). Contacte l&apos;administrateur.
-          </p>
-        )}
+        {isConnected &&
+          kycVerified &&
+          (!tokenInfo.saleContract ||
+            tokenInfo.saleContract ===
+              "0x0000000000000000000000000000000000000000") && (
+            <p style={{ color: "#d32f2f" }}>
+              Ce bien n&apos;a pas encore de contrat de vente configuré
+              (HouseEthSale). Contacte l&apos;administrateur.
+            </p>
+          )}
 
-        {isConnected && kycVerified && tokenInfo.saleContract && (
-          <form
-            onSubmit={handleBuy}
-            style={{ display: "grid", gap: "0.5rem", marginTop: "0.5rem" }}
-          >
-            <label>
-              Montant en ETH :
-              <input
-                type="number"
-                min="0"
-                step="0.001"
-                value={ethAmount}
-                onChange={(e) => setEthAmount(e.target.value)}
-                style={{ width: "100%", marginTop: "0.25rem" }}
-              />
-            </label>
+        {isConnected &&
+          kycVerified &&
+          tokenInfo.saleContract &&
+          tokenInfo.saleContract !==
+            "0x0000000000000000000000000000000000000000" && (
+            <>
+              <p style={{ fontSize: "0.85rem" }}>
+                Contrat de vente :{" "}
+                <code>{tokenInfo.saleContract}</code>
+              </p>
+              <form
+                onSubmit={handleBuy}
+                style={{ display: "grid", gap: "0.5rem", marginTop: "0.5rem" }}
+              >
+                <label>
+                  Montant en ETH :
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.001"
+                    value={ethAmount}
+                    onChange={(e) => setEthAmount(e.target.value)}
+                    style={{ width: "100%", marginTop: "0.25rem" }}
+                  />
+                </label>
 
-            <button type="submit" disabled={isPending}>
-              {isPending ? "Transaction en cours..." : "Acheter des tokens"}
-            </button>
-          </form>
-        )}
+                <button type="submit" disabled={isPending}>
+                  {isPending
+                    ? "Transaction en cours..."
+                    : "Acheter des tokens"}
+                </button>
+              </form>
+            </>
+          )}
 
         {txHash && (
           <p style={{ marginTop: "0.75rem", fontSize: "0.85rem" }}>

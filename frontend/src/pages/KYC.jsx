@@ -1,5 +1,5 @@
 // src/pages/KYC.jsx
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import { useAccount, useReadContract, useWriteContract } from "wagmi";
 import { keccak256, toUtf8Bytes } from "ethers";
 import { CONTRACTS } from "../config/contracts.js";
@@ -12,7 +12,7 @@ const IdentityABI = IdentityJSON.abi;
 
 export default function KYC() {
   const { address, isConnected } = useAccount();
-  const { writeContract, isPending } = useWriteContract();
+  const { writeContractAsync, isPending } = useWriteContract();
 
   const [form, setForm] = useState({
     firstname: "",
@@ -28,11 +28,22 @@ export default function KYC() {
   const [txHash, setTxHash] = useState(null);
   const [hashPreview, setHashPreview] = useState(null);
 
-  // =====================================================
-  // 1) Lecture KYC côté blockchain
-  // =====================================================
+  // ===== 1) Pré-remplir le formulaire si déjà sauvegardé en localStorage =====
+  useEffect(() => {
+    if (!address) return;
+    try {
+      const all = JSON.parse(localStorage.getItem("kycForms") || "{}");
+      const rec = all[address.toLowerCase()];
+      if (rec && rec.form) {
+        setForm(rec.form);
+      }
+    } catch (err) {
+      console.error("Erreur lecture kycForms localStorage:", err);
+    }
+  }, [address]);
 
-  const { data: rawKycRequest } = useReadContract({
+  // ===== 2) Lecture du statut KYC on-chain =====
+  const { data: kycRequestRaw } = useReadContract({
     address: CONTRACTS.kycRequestRegistry,
     abi: KYCRequestABI,
     functionName: "requests",
@@ -52,128 +63,27 @@ export default function KYC() {
     },
   });
 
-  // Normalisation des champs de la struct Request
-  const { exists, approved, rejected, kycHashOnChain } = useMemo(() => {
-    if (!rawKycRequest) {
-      return {
-        exists: false,
-        approved: false,
-        rejected: false,
-        kycHashOnChain: null,
-      };
-    }
+  // Décodage du retour de requests[wallet]
+  // Solidity probable : (bytes32 hash, bool exists, bool approved, bool rejected)
+  let exists = false;
+  let approved = false;
+  let rejected = false;
 
-    // viem retourne un objet struct { 0,1,2,3, kycHash, exists, approved, rejected }
-    const r = rawKycRequest;
-
-    const kycHash =
-      r.kycHash ??
-      r[0] ??
-      null;
-
-    const ex =
-      typeof r.exists === "boolean"
-        ? r.exists
-        : typeof r[1] === "boolean"
-        ? r[1]
-        : false;
-
-    const ap =
-      typeof r.approved === "boolean"
-        ? r.approved
-        : typeof r[2] === "boolean"
-        ? r[2]
-        : false;
-
-    const rej =
-      typeof r.rejected === "boolean"
-        ? r.rejected
-        : typeof r[3] === "boolean"
-        ? r[3]
-        : false;
-
-    return {
-      exists: ex,
-      approved: ap,
-      rejected: rej,
-      kycHashOnChain: kycHash,
-    };
-  }, [rawKycRequest]);
-
-  // =====================================================
-  // 2) Gestion du formulaire
-  // =====================================================
-
-  function updateField(e) {
-    setForm({ ...form, [e.target.name]: e.target.value });
-  }
-
-  function handleIdFile(e) {
-    const f = e.target.files?.[0] || null;
-    setIdFile(f);
-  }
-
-  function handleProofFile(e) {
-    const f = e.target.files?.[0] || null;
-    setProofFile(f);
-  }
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-
-    if (!isConnected || !address) {
-      alert("Connecte ton wallet d'abord via le bouton en haut.");
-      return;
-    }
-
-    // On empêche une nouvelle soumission si la demande existe déjà et n'est pas rejetée
-    if (exists && !rejected) {
-      alert("Tu as déjà une demande KYC en cours ou approuvée.");
-      return;
-    }
-
-    if (!idFile || !proofFile) {
-      alert(
-        "Merci d'importer ta pièce d'identité et ton justificatif de domicile."
-      );
-      return;
-    }
-
-    const payload = {
-      ...form,
-      wallet: address,
-    };
-
-    const json = JSON.stringify(payload);
-    const hash = keccak256(toUtf8Bytes(json));
-    setHashPreview(hash);
-
-    try {
-      const tx = await writeContract({
-        address: CONTRACTS.kycRequestRegistry,
-        abi: KYCRequestABI,
-        functionName: "submitKYC",
-        args: [hash],
-        // tu peux laisser wagmi estimer le gas tout seul, pas besoin de le forcer
-      });
-
-      const txHashFinal = typeof tx === "string" ? tx : tx?.hash ?? null;
-      setTxHash(txHashFinal);
-
-      alert(
-        "Demande KYC envoyée sur la blockchain. Elle est en cours d'examen."
-      );
-    } catch (err) {
-      console.error(err);
-      alert(err?.shortMessage || err?.message || "Erreur lors de l'envoi du KYC");
+  if (kycRequestRaw) {
+    if (Array.isArray(kycRequestRaw)) {
+      exists = Boolean(kycRequestRaw[1]);
+      approved = Boolean(kycRequestRaw[2]);
+      rejected = Boolean(kycRequestRaw[3]);
+    } else if (typeof kycRequestRaw === "object") {
+      // au cas où ton ABI retournerait un objet nommé
+      exists = Boolean(kycRequestRaw.exists);
+      approved = Boolean(kycRequestRaw.approved);
+      rejected = Boolean(kycRequestRaw.rejected);
     }
   }
 
-  // =====================================================
-  // 3) Statut lisible
-  // =====================================================
-
-  let kycStatusLabel = "Aucune demande KYC trouvée pour ce wallet.";
+  // Déduction d'un statut lisible
+  let kycStatusLabel = "Aucune demande KYC trouvée.";
   if (exists) {
     if (approved && !rejected) {
       if (isVerified) {
@@ -186,18 +96,92 @@ export default function KYC() {
     } else if (!approved && !rejected) {
       kycStatusLabel = "⏳ KYC en cours de traitement par l'équipe conformité.";
     } else if (rejected) {
-      kycStatusLabel =
-        "❌ KYC refusé. Tu peux éventuellement soumettre une nouvelle demande mise à jour.";
+      kycStatusLabel = "❌ KYC refusé.";
     }
   }
 
-  // Formulaire visible seulement si :
-  // - aucune demande (exists = false)
-  // - OU demande rejetée (rejected = true)
-  const canShowForm = !exists || rejected;
+  // ===== 3) Handlers formulaire =====
+
+  function updateField(e) {
+    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  }
+
+  function handleIdFile(e) {
+    const f = e.target.files?.[0] || null;
+    setIdFile(f);
+  }
+
+  function handleProofFile(e) {
+    const f = e.target.files?.[0] || null;
+    setProofFile(f);
+  }
+
+  // ===== 4) Submit KYC : on-chain + sauvegarde localStorage pour l'admin =====
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+
+    if (!isConnected || !address) {
+      alert("Connecte ton wallet d'abord via le bouton en haut.");
+      return;
+    }
+
+    if (!idFile || !proofFile) {
+      alert("Merci d'importer ta pièce d'identité et ton justificatif de domicile.");
+      return;
+    }
+
+    // Ce qu'on hash : les infos texte + le wallet
+    const payload = {
+      ...form,
+      wallet: address,
+    };
+
+    const json = JSON.stringify(payload);
+    const hash = keccak256(toUtf8Bytes(json));
+    setHashPreview(hash);
+
+    try {
+      const tx = await writeContractAsync({
+        address: CONTRACTS.kycRequestRegistry,
+        abi: KYCRequestABI,
+        functionName: "submitKYC",
+        args: [hash],
+        gas: BigInt(500000),
+      });
+
+      const txHashValue =
+        typeof tx === "string" ? tx : tx?.hash ?? JSON.stringify(tx);
+      setTxHash(txHashValue);
+
+      alert("Demande KYC envoyée sur la blockchain. Elle est en cours d'examen.");
+
+      // 🟢 Sauvegarde pour l'admin dans localStorage.kycForms
+      try {
+        const key = address.toLowerCase();
+        const existing = JSON.parse(localStorage.getItem("kycForms") || "{}");
+
+        existing[key] = {
+          wallet: address,
+          form: { ...form },
+          hash,
+          createdAt: Date.now(),
+        };
+
+        localStorage.setItem("kycForms", JSON.stringify(existing));
+      } catch (err) {
+        console.error("Erreur sauvegarde kycForms localStorage:", err);
+      }
+    } catch (err) {
+      console.error(err);
+      alert(err?.shortMessage || err?.message || "Erreur lors de l'envoi du KYC");
+    }
+  }
+
+  // ===== 5) Render =====
 
   return (
-    <div style={{ maxWidth: 600, margin: "0 auto" }}>
+    <div style={{ maxWidth: 600 }}>
       <h1>Formulaire KYC</h1>
       <p>
         Ces informations seront utilisées pour vérifier ton identité
@@ -205,149 +189,116 @@ export default function KYC() {
         ton wallet sera autorisé à investir.
       </p>
 
+      {!isConnected && (
+        <p style={{ color: "red" }}>
+          ⚠️ Tu dois d&apos;abord connecter ton wallet
+          (bouton &quot;Se connecter&quot; en haut).
+        </p>
+      )}
+
       <div
         style={{
-          margin: "1rem 0",
+          marginBottom: "1rem",
           padding: "0.75rem",
           background: "#f5f5f5",
           borderRadius: 8,
         }}
       >
-        <p>
-          <strong>Wallet connecté :</strong>{" "}
-          {address ? <code>{address}</code> : "—"}
-        </p>
-        <p style={{ marginTop: "0.5rem" }}>
-          <strong>Statut KYC :</strong>
-          <br />
-          {kycStatusLabel}
-        </p>
-        {kycHashOnChain && (
-          <p style={{ marginTop: "0.5rem", fontSize: "0.85rem" }}>
-            Hash KYC stocké on-chain :<br />
-            <code>{kycHashOnChain}</code>
-          </p>
-        )}
+        <strong>Statut KYC :</strong>
+        <div>{kycStatusLabel}</div>
       </div>
 
-      {!isConnected && (
-        <p style={{ color: "red", marginBottom: "1rem" }}>
-          ⚠️ Tu dois d&apos;abord connecter ton wallet (bouton &quot;Se
-          connecter&quot; en haut).
-        </p>
-      )}
+      <form onSubmit={handleSubmit}>
+        <div>
+          <label>Prénom</label>
+          <input
+            name="firstname"
+            value={form.firstname}
+            onChange={updateField}
+            required
+          />
+        </div>
 
-      {canShowForm ? (
-        <form onSubmit={handleSubmit}>
-          <div>
-            <label>Prénom</label>
-            <input
-              name="firstname"
-              value={form.firstname}
-              onChange={updateField}
-              required
-            />
-          </div>
+        <div>
+          <label>Nom</label>
+          <input
+            name="lastname"
+            value={form.lastname}
+            onChange={updateField}
+            required
+          />
+        </div>
 
-          <div>
-            <label>Nom</label>
-            <input
-              name="lastname"
-              value={form.lastname}
-              onChange={updateField}
-              required
-            />
-          </div>
+        <div>
+          <label>Adresse</label>
+          <input
+            name="street"
+            value={form.street}
+            onChange={updateField}
+            required
+          />
+        </div>
 
-          <div>
-            <label>Adresse</label>
-            <input
-              name="street"
-              value={form.street}
-              onChange={updateField}
-              required
-            />
-          </div>
+        <div>
+          <label>Ville</label>
+          <input
+            name="city"
+            value={form.city}
+            onChange={updateField}
+            required
+          />
+        </div>
 
-          <div>
-            <label>Ville</label>
-            <input
-              name="city"
-              value={form.city}
-              onChange={updateField}
-              required
-            />
-          </div>
+        <div>
+          <label>Pays</label>
+          <input
+            name="country"
+            value={form.country}
+            onChange={updateField}
+            required
+          />
+        </div>
 
-          <div>
-            <label>Pays</label>
-            <input
-              name="country"
-              value={form.country}
-              onChange={updateField}
-              required
-            />
-          </div>
+        <hr style={{ margin: "1.5rem 0" }} />
 
-          <hr style={{ margin: "1.5rem 0" }} />
+        <h2>Pièces justificatives</h2>
 
-          <h2>Pièces justificatives</h2>
+        <div style={{ marginBottom: "1rem" }}>
+          <label>Carte d&apos;identité (image ou PDF)</label>
+          <input
+            type="file"
+            accept="image/*,.pdf"
+            onChange={handleIdFile}
+            required
+          />
+          {idFile && <p>Fichier sélectionné : {idFile.name}</p>}
+        </div>
 
-          <div style={{ marginBottom: "1rem" }}>
-            <label>Carte d&apos;identité (image ou PDF)</label>
-            <input
-              type="file"
-              accept="image/*,.pdf"
-              onChange={handleIdFile}
-              required
-            />
-            {idFile && <p>Fichier sélectionné : {idFile.name}</p>}
-          </div>
+        <div style={{ marginBottom: "1rem" }}>
+          <label>Justificatif de domicile (image ou PDF)</label>
+          <input
+            type="file"
+            accept="image/*,.pdf"
+            onChange={handleProofFile}
+            required
+          />
+          {proofFile && <p>Fichier sélectionné : {proofFile.name}</p>}
+        </div>
 
-          <div style={{ marginBottom: "1rem" }}>
-            <label>Justificatif de domicile (image ou PDF)</label>
-            <input
-              type="file"
-              accept="image/*,.pdf"
-              onChange={handleProofFile}
-              required
-            />
-            {proofFile && <p>Fichier sélectionné : {proofFile.name}</p>}
-          </div>
-
-          <button type="submit" disabled={isPending || !isConnected}>
-            {isPending ? "Transaction en cours..." : "Envoyer mon KYC"}
-          </button>
-        </form>
-      ) : (
-        <p style={{ marginTop: "1rem" }}>
-          Tu ne peux plus modifier le formulaire tant que cette demande n&apos;est
-          pas rejetée. Contacte l&apos;équipe conformité si nécessaire.
-        </p>
-      )}
+        <button type="submit" disabled={isPending || !isConnected}>
+          {isPending ? "Transaction en cours..." : "Envoyer mon KYC"}
+        </button>
+      </form>
 
       {hashPreview && (
-        <p
-          style={{
-            marginTop: "1rem",
-            fontSize: "0.85rem",
-            color: "#555",
-            wordBreak: "break-all",
-          }}
-        >
-          Hash KYC (infos texte + wallet) calculé localement :<br />
+        <p style={{ marginTop: "1rem", fontSize: "0.85rem", color: "#555" }}>
+          Hash KYC (infos texte + wallet) :<br />
           <code>{hashPreview}</code>
         </p>
       )}
 
       {txHash && (
-        <p
-          style={{
-            marginTop: "1rem",
-            fontSize: "0.85rem",
-            wordBreak: "break-all",
-          }}
-        >
+        <p style={{ marginTop: "1rem" }}>
           Transaction envoyée (testnet) :<br />
           <code>{txHash}</code>
         </p>

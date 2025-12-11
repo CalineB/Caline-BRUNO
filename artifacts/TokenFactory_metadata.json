@@ -78,6 +78,25 @@
 				"type": "event"
 			},
 			{
+				"anonymous": false,
+				"inputs": [
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "oldFactory",
+						"type": "address"
+					},
+					{
+						"indexed": true,
+						"internalType": "address",
+						"name": "newFactory",
+						"type": "address"
+					}
+				],
+				"name": "SaleFactoryUpdated",
+				"type": "event"
+			},
+			{
 				"inputs": [
 					{
 						"internalType": "uint256",
@@ -189,6 +208,32 @@
 				"type": "function"
 			},
 			{
+				"inputs": [],
+				"name": "saleFactory",
+				"outputs": [
+					{
+						"internalType": "address",
+						"name": "",
+						"type": "address"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [
+					{
+						"internalType": "address",
+						"name": "_saleFactory",
+						"type": "address"
+					}
+				],
+				"name": "setSaleFactory",
+				"outputs": [],
+				"stateMutability": "nonpayable",
+				"type": "function"
+			},
+			{
 				"inputs": [
 					{
 						"internalType": "address",
@@ -254,11 +299,11 @@
 	},
 	"sources": {
 		"blockchain/contracts/HouseSecurityToken.sol": {
-			"keccak256": "0x4f2b34c8ff1ffe689c3ceec75bf15c15209e368f27664212316b1e203c862bd7",
+			"keccak256": "0x56ac7528f65bc185d375aef54418938388a494da7c3100d0aa63dfa66e6b6c0f",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://19ced38ddd447a515554399271e8aab0eafd73cd774fd101f82d81ca1b3bdcc4",
-				"dweb:/ipfs/QmX4pTN6dwArVHcdH2T3kLMSuPVf263pZ9tUTBf7qXGpWB"
+				"bzz-raw://69057302c6f4103a2b736d995431f691a7e3103fa15246ade2976b369f0bbd25",
+				"dweb:/ipfs/QmUDFQEkTZdHVJ28JxrWSHDVWtcaX4j8caF7hBxcBioKa2"
 			]
 		},
 		"blockchain/contracts/IdentityRegistry.sol": {
@@ -278,11 +323,11 @@
 			]
 		},
 		"blockchain/contracts/TokenFactory.sol": {
-			"keccak256": "0x1497924feb9222d3c652e5387c0b417064dfa36653083e94b61c35b2b9a7762d",
+			"keccak256": "0xd9e8c579c44dd0ec7f6ad5bc4f16f49d6704d873df46c8e9b3df2cf0db6b4010",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://94628829bf37a10c752e977e124cf9064a9f5ef2179faa238fe98e42a72fac41",
-				"dweb:/ipfs/QmTJvDQghr3AThLPtNWakAr3aqmZ4JzAAPcp3mLBeqYg58"
+				"bzz-raw://d1777981fd9482157aaa6a51b9f7311551753c53ddb656919217f42639e70b51",
+				"dweb:/ipfs/QmcEB3so8QDoNiTBwcJkH6GSuDNK3qSLFuFkypz4LiE42H"
 			]
 		}
 	},
