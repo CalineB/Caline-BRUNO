@@ -132,6 +132,19 @@
 			},
 			{
 				"inputs": [],
+				"name": "MIN_INVEST_WEI",
+				"outputs": [
+					{
+						"internalType": "uint256",
+						"name": "",
+						"type": "uint256"
+					}
+				],
+				"stateMutability": "view",
+				"type": "function"
+			},
+			{
+				"inputs": [],
 				"name": "activateSale",
 				"outputs": [],
 				"stateMutability": "nonpayable",
@@ -371,19 +384,19 @@
 	},
 	"sources": {
 		"blockchain/contracts/HouseEthSale.sol": {
-			"keccak256": "0x6db6133336ea31fb2b91ec73edb3e0ad696da08bf534236c46ab6aba899655df",
+			"keccak256": "0x30623961d6860a6a5148b5f7e7af4756d4357e3f86c3f4e89833e5eb8536595a",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://5d3e83b1cefc39dad25dc230367f2f7c33474ccb7da311e1a3eb8a12ed329812",
-				"dweb:/ipfs/QmP6to288QHbRgjPFuw7kYja84EQJM4V1QPjL2pRhaTsMk"
+				"bzz-raw://c74d7df6fb0d8ee1f1a314640c6b86bb5f59313e333c5df4ec359b053151f4c9",
+				"dweb:/ipfs/QmZTxAvpgTndmdaKzQSk1732RQhZa3kfGpLkmccDumiF8G"
 			]
 		},
 		"blockchain/contracts/HouseSecurityToken.sol": {
-			"keccak256": "0x56ac7528f65bc185d375aef54418938388a494da7c3100d0aa63dfa66e6b6c0f",
+			"keccak256": "0x1de0f47c4db130754a1027e7122de4a3f87f537e7fcc89399dac9db20f847255",
 			"license": "MIT",
 			"urls": [
-				"bzz-raw://69057302c6f4103a2b736d995431f691a7e3103fa15246ade2976b369f0bbd25",
-				"dweb:/ipfs/QmUDFQEkTZdHVJ28JxrWSHDVWtcaX4j8caF7hBxcBioKa2"
+				"bzz-raw://105fade105df6a9bdf073e476230357ce6e8f443595285d74d99012e708bc29e",
+				"dweb:/ipfs/QmYkxfihvFwRSzB3VjZDejhNiuAcknSJc3mBua6AC45DEF"
 			]
 		},
 		"blockchain/contracts/IdentityRegistry.sol": {
