@@ -648,9 +648,14 @@ h1,h2,h3{ margin:0; letter-spacing: .2px; }
 /* Inputs admin */
 .label{
   font-family: var(--font2);
-  font-size: .82rem;
+  font-size: 1rem;
   color: rgba(255,255,255,.68);
 }
+
+p.muted {
+  font-size: .82rem;
+}
+
 .input,
 .textarea{
   width:100%;

@@ -37,9 +37,68 @@ function safeParseJSON(str, fallback) {
   }
 }
 
+/* ===================== IMAGE HELPERS (local only) ===================== */
+async function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
+// Compression simple pour éviter de remplir localStorage trop vite
+// - réduit largeur max
+// - convertit en jpeg (plus léger que png la plupart du temps)
+async function compressImageToDataUrl(file, maxWidth = 1400, quality = 0.82) {
+  const src = await fileToDataUrl(file);
+
+  if (!file.type?.startsWith("image/")) return src;
+
+  const img = new Image();
+  img.src = src;
+  await new Promise((res, rej) => {
+    img.onload = res;
+    img.onerror = rej;
+  });
+
+  const scale = Math.min(1, maxWidth / img.width);
+  const w = Math.round(img.width * scale);
+  const h = Math.round(img.height * scale);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0, w, h);
+
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+async function handlePropertyImageChange(tokenAddr, file, updatePropertyField) {
+  if (!file) return;
+
+  if (file.size > 4 * 1024 * 1024) {
+    alert("Image trop lourde (> 4MB). Compresse-la puis réessaie.");
+    return;
+  }
+
+  try {
+    const dataUrl = await compressImageToDataUrl(file);
+    updatePropertyField(tokenAddr, "imageDataUrl", dataUrl);
+    alert("✅ Image enregistrée (local uniquement).");
+  } catch (e) {
+    console.error(e);
+    alert("Erreur lecture/compression image.");
+  }
+}
+
 export default function Admin() {
   const { address, isConnected } = useAccount();
   const { writeContract, isPending } = useWriteContract();
+
+  const [txError, setTxError] = useState(null);
 
   // ---- Vérifier si admin (owner de IdentityRegistry) ----
   const { data: ownerAddress } = useReadContract({
@@ -215,7 +274,6 @@ export default function Admin() {
     setKycForms(safeParseJSON(localStorage.getItem("kycForms") || "{}", {}));
   }
 
-  // écoute storage (utile si ton formulaire KYC écrit dans localStorage depuis une autre page)
   useEffect(() => {
     function onStorage(e) {
       if (e.key === "kycForms") refreshKycForms();
@@ -306,7 +364,6 @@ export default function Admin() {
     localStorage.setItem("propertyMeta", JSON.stringify(next));
   }
 
-  // écoute storage pour propertyMeta aussi (si tu modifies depuis une autre page)
   useEffect(() => {
     function onStorage(e) {
       if (e.key === "propertyMeta") {
@@ -331,7 +388,7 @@ export default function Admin() {
         sqm: "",
         yield: "",
         description: "",
-        imageDataUrl: null,
+        imageDataUrl: null, // ✅ image du bien (local only)
         published: false,
         projectOwner: "",
         spvName: "",
@@ -360,8 +417,6 @@ export default function Admin() {
   function unpublishAndHideLocal(tokenAddr) {
     const key = tokenAddr.toLowerCase();
     const current = getMeta(tokenAddr);
-
-    // on garde les infos mais on le sort du market
     const updated = { ...current, published: false };
     const next = { ...propertyMeta, [key]: updated };
     savePropertyMeta(next);
@@ -370,9 +425,8 @@ export default function Admin() {
   const [tokens, setTokens] = useState([]);
   const [loadingTokens, setLoadingTokens] = useState(false);
 
-  // sale status + active token status
   const [saleStatusBySale, setSaleStatusBySale] = useState({});
-  const [activeByToken, setActiveByToken] = useState({}); // tokenAddrLower -> bool
+  const [activeByToken, setActiveByToken] = useState({});
   const [autoActivateAfterLink, setAutoActivateAfterLink] = useState(true);
 
   useEffect(() => {
@@ -428,7 +482,6 @@ export default function Admin() {
 
         setTokens(list);
 
-        // charger statuts des sales linkés
         const saleAddrs = Array.from(
           new Set(
             list
@@ -538,8 +591,12 @@ export default function Admin() {
       <div className="container">
         <h1>Admin</h1>
         <p>Tu n&apos;es pas autorisé à accéder à l&apos;administration.</p>
-        <p>Wallet connecté : <code>{address}</code></p>
-        <p>Owner attendu : <code>{ownerAddress?.toString()}</code></p>
+        <p>
+          Wallet connecté : <code>{address}</code>
+        </p>
+        <p>
+          Owner attendu : <code>{ownerAddress?.toString()}</code>
+        </p>
       </div>
     );
   }
@@ -554,6 +611,11 @@ export default function Admin() {
         <p className="muted" style={{ margin: 0 }}>
           Admin : <code>{address}</code>
         </p>
+        {txError && (
+          <p className="muted" style={{ marginTop: 8 }}>
+            ⚠️ Dernière erreur : <code>{txError}</code>
+          </p>
+        )}
       </div>
 
       {/* ========================== SECTION KYC ========================== */}
@@ -598,13 +660,16 @@ export default function Admin() {
                   disabled={isPending || !canApproveManual}
                   onClick={async () => {
                     try {
+                      setTxError(null);
                       await approveKyc(kycWallet);
                       await verifyInvestor(kycWallet);
                       alert("✅ KYC approuvé + whitelist ON.");
                       setReloadFlag((x) => x + 1);
                       refreshKycForms();
                     } catch (e) {
-                      alert(e?.shortMessage || e?.message || "Erreur approve");
+                      const msg = e?.shortMessage || e?.message || "Erreur approve";
+                      setTxError(msg);
+                      alert(msg);
                     }
                   }}
                 >
@@ -617,11 +682,14 @@ export default function Admin() {
                   disabled={isPending || !canRevokeManual}
                   onClick={async () => {
                     try {
+                      setTxError(null);
                       await revokeInvestor(kycWallet);
                       alert("🧊 Whitelist révoquée (gel).");
                       setReloadFlag((x) => x + 1);
                     } catch (e) {
-                      alert(e?.shortMessage || e?.message || "Erreur revoke");
+                      const msg = e?.shortMessage || e?.message || "Erreur revoke";
+                      setTxError(msg);
+                      alert(msg);
                     }
                   }}
                 >
@@ -633,11 +701,14 @@ export default function Admin() {
                   disabled={isPending || !canReWhitelistManual}
                   onClick={async () => {
                     try {
+                      setTxError(null);
                       await verifyInvestor(kycWallet);
                       alert("✅ Wallet re-whiteliste.");
                       setReloadFlag((x) => x + 1);
                     } catch (e) {
-                      alert(e?.shortMessage || e?.message || "Erreur re-whitelist");
+                      const msg = e?.shortMessage || e?.message || "Erreur re-whitelist";
+                      setTxError(msg);
+                      alert(msg);
                     }
                   }}
                 >
@@ -650,12 +721,15 @@ export default function Admin() {
                   disabled={isPending || !canRejectManual}
                   onClick={async () => {
                     try {
+                      setTxError(null);
                       await rejectKyc(kycWallet);
                       await revokeInvestor(kycWallet);
                       alert("❌ Rejeté + whitelist OFF.");
                       setReloadFlag((x) => x + 1);
                     } catch (e) {
-                      alert(e?.shortMessage || e?.message || "Erreur reject");
+                      const msg = e?.shortMessage || e?.message || "Erreur reject";
+                      setTxError(msg);
+                      alert(msg);
                     }
                   }}
                 >
@@ -706,8 +780,8 @@ export default function Admin() {
             items={pendingList}
             isPending={isPending}
             onApprove={async (wallet, form) => {
-              if (form?.taxCountry && form.taxCountry !== "FR") {
-                alert("Compliance: résidence fiscale ≠ FR.");
+              if (form?.taxCountry && form.taxCountry !== "France") {
+                alert("Compliance: résidence fiscale ≠ France.");
                 return;
               }
               await approveKyc(wallet);
@@ -847,6 +921,7 @@ export default function Admin() {
                 disabled={isPending}
                 onClick={async () => {
                   try {
+                    setTxError(null);
                     const ok = window.confirm("Déployer ce nouveau bien on-chain ?");
                     if (!ok) return;
 
@@ -854,7 +929,9 @@ export default function Admin() {
                     alert("✅ Transaction envoyée. Rafraîchis la liste.");
                     setReloadFlag((x) => x + 1);
                   } catch (e) {
-                    alert(e?.shortMessage || e?.message || "Erreur création bien");
+                    const msg = e?.shortMessage || e?.message || "Erreur création bien";
+                    setTxError(msg);
+                    alert(msg);
                   }
                 }}
               >
@@ -985,6 +1062,7 @@ export default function Admin() {
                         disabled={isPending}
                         onClick={async () => {
                           try {
+                            setTxError(null);
                             if (tokenActive) {
                               await deactivateHouseToken(t.address);
                               alert("⛔ Token désactivé (soft-delete on-chain).");
@@ -994,7 +1072,9 @@ export default function Admin() {
                             }
                             setReloadFlag((x) => x + 1);
                           } catch (e) {
-                            alert(e?.shortMessage || e?.message || "Erreur toggle token active");
+                            const msg = e?.shortMessage || e?.message || "Erreur toggle token active";
+                            setTxError(msg);
+                            alert(msg);
                           }
                         }}
                       >
@@ -1012,13 +1092,15 @@ export default function Admin() {
                           if (!ok) return;
 
                           try {
-                            await deactivateHouseToken(t.address); // trace on-chain + event
-                            unpublishAndHideLocal(t.address); // retire du Market
+                            setTxError(null);
+                            await deactivateHouseToken(t.address);
+                            unpublishAndHideLocal(t.address);
                             alert("🗑️ Bien supprimé (soft-delete on-chain + dépublié).");
                             setReloadFlag((x) => x + 1);
                           } catch (e) {
-                            console.error(e);
-                            alert(e?.shortMessage || e?.message || "Erreur suppression bien");
+                            const msg = e?.shortMessage || e?.message || "Erreur suppression bien";
+                            setTxError(msg);
+                            alert(msg);
                           }
                         }}
                       >
@@ -1143,6 +1225,53 @@ export default function Admin() {
                       />
                     </div>
 
+                    {/* ✅ IMAGE DU BIEN (LOCAL ONLY) */}
+                    <div style={{ marginTop: 12 }}>
+                      <label className="label">Image du bien</label>
+
+                      {meta.imageDataUrl ? (
+                        <div style={{ marginTop: 8 }}>
+                          <img
+                            src={meta.imageDataUrl}
+                            alt="Aperçu"
+                            style={{
+                              width: "100%",
+                              maxWidth: 520,
+                              borderRadius: 14,
+                              border: "1px solid rgba(255,255,255,.16)",
+                              display: "block",
+                            }}
+                          />
+                          <div className="actionRow" style={{ marginTop: 10 }}>
+                            <button
+                              className="btn btn--ghost"
+                              type="button"
+                              onClick={() => updatePropertyField(t.address, "imageDataUrl", null)}
+                            >
+                              🗑️ Supprimer l’image
+                            </button>
+                          </div>
+                          <p className="muted" style={{ marginTop: 6 }}>
+                            Stockée localement (localStorage). Rien n’est envoyé sur un serveur.
+                          </p>
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: 8 }}>
+                          <input
+                            className="input"
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) =>
+                              handlePropertyImageChange(t.address, e.target.files?.[0], updatePropertyField)
+                            }
+                          />
+                          <p className="muted" style={{ marginTop: 6 }}>
+                            Stockée localement (localStorage). Si ça sature, on passera à IndexedDB plus tard.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
                     {/* Liaison Sale + Toggle saleActive */}
                     <div style={{ marginTop: 14 }} className="card card--soft">
                       <div className="card__body">
@@ -1159,6 +1288,7 @@ export default function Admin() {
                               disabled={isPending || saleStatus?.error}
                               onClick={async () => {
                                 try {
+                                  setTxError(null);
                                   if (saleStatus?.saleActive) {
                                     await deactivateSale(t.saleContract);
                                     alert("⏸️ Vente désactivée.");
@@ -1168,7 +1298,9 @@ export default function Admin() {
                                   }
                                   setReloadFlag((x) => x + 1);
                                 } catch (e) {
-                                  alert(e?.shortMessage || e?.message || "Erreur toggle sale");
+                                  const msg = e?.shortMessage || e?.message || "Erreur toggle sale";
+                                  setTxError(msg);
+                                  alert(msg);
                                 }
                               }}
                             >
@@ -1220,7 +1352,12 @@ export default function Admin() {
                                   onChange={(e) => updateSaleInput(t.address, e.target.value)}
                                 />
                                 <div className="actionRow" style={{ marginTop: 10, gap: 10 }}>
-                                  <button className="btn" disabled={isPending} onClick={() => handleSetSaleContract(t.address)} type="button">
+                                  <button
+                                    className="btn"
+                                    disabled={isPending}
+                                    onClick={() => handleSetSaleContract(t.address)}
+                                    type="button"
+                                  >
                                     💾 Enregistrer
                                   </button>
                                   <button className="btn btn--ghost" type="button" onClick={() => toggleEditSale(t.address)}>
@@ -1270,7 +1407,11 @@ function KycListCard({
           <span className={`badge badge--${tone}`}>{items.length}</span>
         </div>
 
-        {items.length === 0 && <p className="muted" style={{ marginTop: 10 }}>Aucun.</p>}
+        {items.length === 0 && (
+          <p className="muted" style={{ marginTop: 10 }}>
+            Aucun.
+          </p>
+        )}
 
         {items.map((item) => (
           <div key={item.wallet} className="item" style={{ marginTop: 12 }}>

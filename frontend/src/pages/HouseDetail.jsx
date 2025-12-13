@@ -1,437 +1,384 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useAccount, useWriteContract } from "wagmi";
-import { readContract } from "wagmi/actions";
-import { formatEther, parseEther } from "viem";
-
+import { readContract, waitForTransactionReceipt } from "wagmi/actions";
 import { config } from "../web3/wagmiConfig.js";
-import { CONTRACTS } from "../config/contracts.js";
 
+import { CONTRACTS } from "../config/contracts.js";
 import HouseTokenJSON from "../abis/HouseSecurityToken.json";
+import IdentityJSON from "../abis/IdentityRegistry.json";
 import SaleJSON from "../abis/HouseEthSale.json";
 
-import { useKycStatus } from "../hooks/useKycStatus.js";
-import KycBadge from "../components/KycBadge.jsx";
-import CrystalButton from "../components/CrystalButton.jsx";
-
 const HouseTokenABI = HouseTokenJSON.abi;
+const IdentityABI = IdentityJSON.abi;
 const SaleABI = SaleJSON.abi;
 
-function isZeroAddress(a) {
-  return !a || a === "0x0000000000000000000000000000000000000000";
+const ZERO = "0x0000000000000000000000000000000000000000";
+const SEPOLIA_ID = 11155111;
+
+function isValidAddress(addr) {
+  return typeof addr === "string" && addr.startsWith("0x") && addr.length === 42;
 }
 
-function clampInt(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.floor(n));
+function safeParseJSON(str, fallback) {
+  try {
+    return JSON.parse(str ?? "");
+  } catch {
+    return fallback;
+  }
 }
 
-function safeNum(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+// ceil(a/b) for BigInt
+function ceilDiv(a, b) {
+  a = BigInt(a);
+  b = BigInt(b);
+  if (b === 0n) return 0n;
+  return (a + b - 1n) / b;
+}
+
+function formatEth(wei) {
+  try {
+    const w = BigInt(wei ?? 0n);
+    const int = w / 10n ** 18n;
+    const frac = (w % 10n ** 18n).toString().padStart(18, "0").slice(0, 6);
+    return `${int}.${frac}`;
+  } catch {
+    return "0";
+  }
 }
 
 export default function HouseDetail() {
   const { tokenAddress } = useParams();
-  const { address, isConnected } = useAccount();
-  const { writeContract, isPending } = useWriteContract();
+  const tokenAddr = tokenAddress; // ✅ FIX CRITIQUE
 
-  const kyc = useKycStatus(address);
+  const { address, isConnected, chain } = useAccount();
+  const { writeContractAsync, isPending } = useWriteContract();
 
   const [loading, setLoading] = useState(true);
-  const [tokenInfo, setTokenInfo] = useState(null);
-  const [saleInfo, setSaleInfo] = useState(null);
-
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
-
-  // input "parts"
-  const [tokenAmount, setTokenAmount] = useState("");
-  const parts = clampInt(tokenAmount);
-
   const [txHash, setTxHash] = useState(null);
+  const [txError, setTxError] = useState(null);
 
-  // --- meta off-chain (localStorage) ---
-  const meta = useMemo(() => {
-    try {
-      const allMeta = JSON.parse(localStorage.getItem("propertyMeta") || "{}");
-      const key = tokenAddress?.toLowerCase();
-      return (key && allMeta[key]) || allMeta[tokenAddress] || null;
-    } catch {
-      return null;
-    }
-  }, [tokenAddress]);
+  const [token, setToken] = useState(null);
+  const [sale, setSale] = useState(null);
+  const [isVerified, setIsVerified] = useState(false);
 
-  const images = meta?.images || (meta?.imageDataUrl ? [meta.imageDataUrl] : []);
-  const mainImage = images.length > 0 ? images[currentImageIndex] || images[0] : null;
+  const [investEth, setInvestEth] = useState("0.05");
 
-  // --- load token info ---
+  // ✅ meta live update (si admin modifie localStorage)
+  const [metaVersion, setMetaVersion] = useState(0);
   useEffect(() => {
-    if (!tokenAddress) return;
+    function onStorage(e) {
+      if (e.key === "propertyMeta") setMetaVersion((v) => v + 1);
+    }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
-    async function loadTokenAndSale() {
-      setLoading(true);
-      setTokenInfo(null);
-      setSaleInfo(null);
-      setTxHash(null);
+  const metaMap = useMemo(
+    () => safeParseJSON(localStorage.getItem("propertyMeta") || "{}", {}),
+    [metaVersion]
+  );
 
+  const meta = useMemo(() => {
+    if (!isValidAddress(tokenAddr)) return {};
+    return metaMap[String(tokenAddr).toLowerCase()] || {};
+  }, [tokenAddr, metaMap]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
       try {
+        setLoading(true);
+        setTxError(null);
+
+        if (!isValidAddress(tokenAddr)) {
+          throw new Error("Token introuvable (adresse invalide).");
+        }
+
         const [name, symbol, totalSupply, maxSupply, saleContract] = await Promise.all([
-          readContract(config, { address: tokenAddress, abi: HouseTokenABI, functionName: "name" }),
-          readContract(config, { address: tokenAddress, abi: HouseTokenABI, functionName: "symbol" }),
-          readContract(config, { address: tokenAddress, abi: HouseTokenABI, functionName: "totalSupply" }),
-          readContract(config, { address: tokenAddress, abi: HouseTokenABI, functionName: "maxSupply" }),
-          readContract(config, { address: tokenAddress, abi: HouseTokenABI, functionName: "saleContract" }),
+          readContract(config, { address: tokenAddr, abi: HouseTokenABI, functionName: "name" }),
+          readContract(config, { address: tokenAddr, abi: HouseTokenABI, functionName: "symbol" }),
+          readContract(config, { address: tokenAddr, abi: HouseTokenABI, functionName: "totalSupply" }),
+          readContract(config, { address: tokenAddr, abi: HouseTokenABI, functionName: "maxSupply" }),
+          readContract(config, { address: tokenAddr, abi: HouseTokenABI, functionName: "saleContract" }),
         ]);
 
         const ts = BigInt(totalSupply ?? 0n);
         const ms = BigInt(maxSupply ?? 0n);
-        const progress = ms > 0n ? Number((ts * 100n) / ms) : 0;
+        const remaining = ms > ts ? ms - ts : 0n;
 
-        const tInfo = { name, symbol, totalSupply: ts, maxSupply: ms, progress, saleContract };
-        setTokenInfo(tInfo);
+        const tokenObj = {
+          address: tokenAddr,
+          name,
+          symbol,
+          totalSupply: ts,
+          maxSupply: ms,
+          remaining,
+          saleContract,
+        };
 
-        // sale info (si lié)
-        if (saleContract && !isZeroAddress(saleContract)) {
-          try {
-            const [priceWeiPerToken, saleActive] = await Promise.all([
-              readContract(config, { address: saleContract, abi: SaleABI, functionName: "priceWeiPerToken" }),
-              readContract(config, { address: saleContract, abi: SaleABI, functionName: "saleActive" }),
-            ]);
+        let saleObj = null;
 
-            setSaleInfo({
-              saleContract,
-              priceWeiPerToken: BigInt(priceWeiPerToken ?? 0n),
-              saleActive: Boolean(saleActive),
-            });
-          } catch (err) {
-            console.error("Erreur lecture sale:", err);
-            setSaleInfo({ saleContract, priceWeiPerToken: 0n, saleActive: false, readError: true });
-          }
-        } else {
-          setSaleInfo(null);
+        if (isValidAddress(saleContract) && saleContract !== ZERO) {
+          const [saleActive, priceWeiPerToken, minInvestWei] = await Promise.all([
+            readContract(config, { address: saleContract, abi: SaleABI, functionName: "saleActive" }),
+            readContract(config, { address: saleContract, abi: SaleABI, functionName: "priceWeiPerToken" }),
+            readContract(config, { address: saleContract, abi: SaleABI, functionName: "MIN_INVEST_WEI" }),
+          ]);
+
+          const price = BigInt(priceWeiPerToken ?? 0n);
+          const minWei = BigInt(minInvestWei ?? 0n);
+          const minTokens = price > 0n ? ceilDiv(minWei, price) : 0n;
+          const minFeasible = minTokens <= remaining && remaining > 0n;
+
+          saleObj = {
+            address: saleContract,
+            saleActive: Boolean(saleActive),
+            priceWeiPerToken: price,
+            minInvestWei: minWei,
+            minTokens,
+            minFeasible,
+          };
         }
-      } catch (err) {
-        console.error("Erreur load token:", err);
+
+        let verified = false;
+        if (address && isValidAddress(address)) {
+          const v = await readContract(config, {
+            address: CONTRACTS.identityRegistry,
+            abi: IdentityABI,
+            functionName: "isVerified",
+            args: [address],
+          });
+          verified = Boolean(v);
+        }
+
+        if (!cancelled) {
+          setToken(tokenObj);
+          setSale(saleObj);
+          setIsVerified(verified);
+        }
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) setTxError(e?.shortMessage || e?.message || "Erreur chargement");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
-    loadTokenAndSale();
-  }, [tokenAddress]);
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [tokenAddr, address]);
 
-  // --- computed display ---
-  const maxSupplyNum = tokenInfo?.maxSupply ? Number(tokenInfo.maxSupply) : 0;
-  const priceEUR = meta?.price ? safeNum(meta.price) : null;
+  const investWei = useMemo(() => {
+    const s = String(investEth || "").trim();
+    if (!s || !/^\d+(\.\d{0,18})?$/.test(s)) return null;
+    const [a, b = ""] = s.split(".");
+    const frac = (b + "0".repeat(18)).slice(0, 18);
+    return BigInt(a) * 10n ** 18n + BigInt(frac);
+  }, [investEth]);
 
-  const pricePerTokenEUR = priceEUR !== null && maxSupplyNum > 0 ? priceEUR / maxSupplyNum : null;
-  const percentPerToken = maxSupplyNum > 0 ? 100 / maxSupplyNum : null;
+  const tokensToBuy = useMemo(() => {
+    if (!sale || !token || investWei === null) return 0n;
+    if (sale.priceWeiPerToken <= 0n) return 0n;
+    return investWei / sale.priceWeiPerToken; // floor comme dans le contrat
+  }, [sale, token, investWei]);
 
-  const requiredWei =
-    saleInfo?.priceWeiPerToken && saleInfo.priceWeiPerToken > 0n
-      ? BigInt(parts) * saleInfo.priceWeiPerToken
-      : 0n;
+  const willRevertReason = useMemo(() => {
+    if (!isConnected) return "Connecte ton wallet.";
+    if (chain?.id !== SEPOLIA_ID) return "Réseau incorrect : Sepolia requis.";
+    if (!token) return "Token indisponible.";
+    if (!sale) return "Vente non configurée (saleContract vide).";
+    if (!sale.saleActive) return "Vente inactive.";
+    if (!isVerified) return "Wallet non KYC (IdentityRegistry).";
+    if (token.remaining === 0n) return "Plus de tokens disponibles.";
+    if (investWei === null) return "Montant ETH invalide.";
+    if (investWei <= 0n) return "Montant ETH nul.";
+    if (investWei < sale.minInvestWei) return `Minimum investissement: ${formatEth(sale.minInvestWei)} ETH.`;
 
-  const requiredEthString = requiredWei > 0n ? Number(formatEther(requiredWei)).toFixed(6) : null;
+    // ✅ cas important : min impossible vs supply restante
+    if (!sale.minFeasible) {
+      return `Min investissement impossible: il reste ${String(token.remaining)} tokens mais min = ${String(sale.minTokens)}. Ajuste prix/min/maxSupply.`;
+    }
 
-  const isLinked = saleInfo?.saleContract && !isZeroAddress(saleInfo.saleContract);
+    if (tokensToBuy === 0n) return "Montant trop bas pour 1 token au prix actuel.";
+    if (tokensToBuy > token.remaining) return `Tu demandes ${String(tokensToBuy)} tokens mais il ne reste que ${String(token.remaining)}. Baisse le montant.`;
 
-  // ✅ MIN INVEST 0.05 ETH (front)
-  const MIN_INVEST_WEI = parseEther("0.05");
+    return null;
+  }, [isConnected, chain?.id, token, sale, isVerified, investWei, tokensToBuy]);
 
-  // nb minimal de tokens pour atteindre 0.05 ETH (arrondi au-dessus)
-  const minParts =
-    saleInfo?.priceWeiPerToken && saleInfo.priceWeiPerToken > 0n
-      ? Number((MIN_INVEST_WEI + saleInfo.priceWeiPerToken - 1n) / saleInfo.priceWeiPerToken)
-      : 1;
+  async function handleBuy() {
+    setTxHash(null);
+    setTxError(null);
 
-  async function handleBuy(e) {
-    e.preventDefault();
-
-    if (!isConnected) return alert("⚠️ Tu dois d’abord connecter ton wallet.");
-    if (!kyc.exists) return alert("⚠️ Tu dois soumettre un KYC avant d’investir.");
-    if (kyc.rejected) return alert("❌ Ton KYC a été rejeté.");
-    if (!kyc.approved) return alert("⏳ Ton KYC est en attente.");
-    if (kyc.approved && !kyc.isVerified)
-      return alert("⚠️ KYC validé mais achats non autorisés (compte gelé / conformité).");
-
-    if (!isLinked) return alert("Ce bien n'a pas encore de contrat de vente configuré (HouseEthSale).");
-    if (saleInfo?.readError) return alert("Contrat de vente trouvé mais lecture impossible (ABI / réseau).");
-    if (!saleInfo?.saleActive) return alert("La vente n'est pas active. L’admin/SPV doit activer la vente.");
-    if (!parts || parts <= 0) return alert("Choisis un nombre de parts (>= 1).");
-    if (!saleInfo?.priceWeiPerToken || saleInfo.priceWeiPerToken <= 0n) return alert("Prix on-chain invalide.");
-
-    // ✅ minimum 0.05 ETH (UX)
-    if (requiredWei < MIN_INVEST_WEI) {
-      return alert(`Montant minimum : 0.05 ETH (≈ ${minParts} token(s) minimum).`);
+    const reason = willRevertReason;
+    if (reason) {
+      setTxError(reason);
+      return;
     }
 
     try {
-      const tx = await writeContract({
-        address: saleInfo.saleContract,
+      const hash = await writeContractAsync({
+        address: sale.address,
         abi: SaleABI,
         functionName: "buyTokens",
         args: [],
-        value: requiredWei,
+        value: investWei,
       });
 
-      const hash = typeof tx === "string" ? tx : tx?.hash;
-      setTxHash(hash || null);
-      alert("Transaction envoyée !");
-    } catch (err) {
-      console.error(err);
-      alert(err?.shortMessage || err?.message || "Erreur achat");
+      setTxHash(hash);
+      await waitForTransactionReceipt(config, { hash });
+    } catch (e) {
+      console.error(e);
+      setTxError(e?.shortMessage || e?.message || "Erreur transaction");
     }
   }
 
-  if (loading || !tokenInfo) {
+  if (loading) {
     return (
       <div className="container">
         <div className="card">
           <div className="card__body">
-            <p className="muted">Chargement du bien…</p>
+            <p className="muted">Chargement…</p>
           </div>
         </div>
       </div>
     );
   }
 
-  const title = meta?.name || tokenInfo.name;
+  if (!token) {
+    return (
+      <div className="container">
+        <div className="card">
+          <div className="card__body">
+            <p className="muted">{txError || "Token introuvable."}</p>
+            <p className="muted" style={{ marginTop: 8 }}>
+              URL param tokenAddress: <code>{String(tokenAddr)}</code>
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="container">
-      <div className="grid2">
-        {/* ------------ COLONNE GAUCHE ------------ */}
-        <div>
-          <div style={{ marginBottom: 12 }}>
-            <Link
-              to="/market"
-              className="muted"
-              style={{ textDecoration: "underline", textUnderlineOffset: 4 }}
-            >
-              ← Retour au market
-            </Link>
+    <div className="container" style={{ display: "grid", gap: 16 }}>
+      <div className="card">
+        <div className="card__body">
+          <h1 style={{ marginTop: 0 }}>{meta.name || token.name}</h1>
+          <p className="muted" style={{ marginTop: 6 }}>
+            Token: <code>{token.address}</code>
+          </p>
+
+          <div className="muted" style={{ marginTop: 10 }}>
+            Supply: {String(token.totalSupply)} / {String(token.maxSupply)} • Reste:{" "}
+            <strong>{String(token.remaining)}</strong>
           </div>
 
-          {mainImage && (
-            <div className="card" style={{ overflow: "hidden" }}>
+          {meta.imageDataUrl && (
+            <div style={{ marginTop: 12 }}>
               <img
-                src={mainImage}
-                alt={title}
-                style={{ width: "100%", height: 360, objectFit: "cover", display: "block" }}
+                src={meta.imageDataUrl}
+                alt="bien"
+                style={{ width: "100%", borderRadius: 16 }}
               />
             </div>
           )}
+        </div>
+      </div>
 
-          {images.length > 1 && (
-            <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {images.map((img, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => setCurrentImageIndex(idx)}
-                  style={{
-                    border: "1px solid rgba(255,255,255,.14)",
-                    background: "rgba(255,255,255,.04)",
-                    borderRadius: 14,
-                    padding: 6,
-                    cursor: "pointer",
-                    outline: "none",
-                    opacity: idx === currentImageIndex ? 1 : 0.75,
-                  }}
-                  aria-label={`Voir image ${idx + 1}`}
-                >
-                  <img
-                    src={img}
-                    alt={`thumbnail-${idx}`}
-                    style={{ width: 92, height: 62, objectFit: "cover", borderRadius: 10, display: "block" }}
-                  />
-                </button>
-              ))}
+      <div className="card">
+        <div className="card__body">
+          <h3 style={{ marginTop: 0 }}>Investir</h3>
+
+          {!sale && (
+            <p className="muted">
+              Vente non configurée : <code>saleContract</code> est vide. Configure-la dans l’admin.
+            </p>
+          )}
+
+          {sale && (
+            <div className="muted" style={{ display: "grid", gap: 6 }}>
+              <div>
+                Sale: <code>{sale.address}</code>
+              </div>
+              <div>
+                Statut: <strong>{sale.saleActive ? "active" : "inactive"}</strong>
+              </div>
+              <div>
+                Prix: <strong>{formatEth(sale.priceWeiPerToken)} ETH</strong> / token
+              </div>
+              <div>
+                Min invest: <strong>{formatEth(sale.minInvestWei)} ETH</strong> → min tokens:{" "}
+                <strong>{String(sale.minTokens)}</strong>
+              </div>
+
+              {!sale.minFeasible && (
+                <div>
+                  <span className="badge badge--danger">
+                    Min impossible avec la supply restante ({String(token.remaining)})
+                  </span>
+                </div>
+              )}
             </div>
           )}
 
-          <div style={{ marginTop: 16 }}>
-            <h1 style={{ marginBottom: 6 }}>{title}</h1>
-            <div className="muted">
-              Security token · <strong>{tokenInfo.symbol}</strong>
-            </div>
-
-            {meta?.spvName && (
-              <div className="card" style={{ marginTop: 14 }}>
-                <div className="card__body">
-                  <div className="muted">SPV</div>
-                  <div style={{ fontWeight: 800, marginTop: 4 }}>{meta.spvName}</div>
-                  <div className="muted" style={{ marginTop: 6 }}>
-                    {meta.spvRegistration || "—"}
-                    {meta.spvContractNumber ? ` · ${meta.spvContractNumber}` : ""}
-                  </div>
-                </div>
-              </div>
+          <div style={{ marginTop: 12 }}>
+            <label className="label">Montant ETH</label>
+            <input
+              className="input"
+              value={investEth}
+              onChange={(e) => setInvestEth(e.target.value)}
+              placeholder="0.05"
+            />
+            {sale && investWei !== null && (
+              <p className="muted" style={{ marginTop: 8 }}>
+                Tu achètes <strong>{String(tokensToBuy)}</strong> token(s) (reste{" "}
+                {String(token.remaining)}).
+              </p>
             )}
-
-            <div className="card" style={{ marginTop: 14 }}>
-              <div className="card__body">
-                <div className="muted">
-                  {meta?.addressLine ? `${meta.addressLine}, ` : ""}
-                  {meta?.city || ""}
-                  {meta?.country ? `, ${meta.country}` : ""}
-                </div>
-
-                <div
-                  style={{
-                    marginTop: 10,
-                    display: "grid",
-                    gap: 10,
-                    gridTemplateColumns: "repeat(3, minmax(0,1fr))",
-                  }}
-                >
-                  <div>
-                    <div className="muted">Prix (€)</div>
-                    <div style={{ fontWeight: 800 }}>{meta?.price || "—"}</div>
-                  </div>
-                  <div>
-                    <div className="muted">Surface (m²)</div>
-                    <div style={{ fontWeight: 800 }}>{meta?.sqm || "—"}</div>
-                  </div>
-                  <div>
-                    <div className="muted">Pièces</div>
-                    <div style={{ fontWeight: 800 }}>{meta?.rooms || "—"}</div>
-                  </div>
-                </div>
-
-                <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <div className="pill">
-                    <span className="pill__label">Rendement cible</span> {meta?.yield ? `${meta.yield}%` : "—"}
-                  </div>
-                  {percentPerToken !== null && (
-                    <div className="pill">
-                      <span className="pill__label">Part / token</span> {percentPerToken.toFixed(4)}%
-                    </div>
-                  )}
-                </div>
-
-                {meta?.description && (
-                  <p className="muted" style={{ marginTop: 12, lineHeight: 1.7 }}>
-                    {meta.description}
-                  </p>
-                )}
-              </div>
-            </div>
           </div>
-        </div>
 
-        {/* ------------ COLONNE DROITE ------------ */}
-        <div className="card" style={{ position: "sticky", top: 92, alignSelf: "start" }}>
-          <div className="card__body">
-            <div className="flex between">
-              <h2 style={{ margin: 0 }}>Investir</h2>
-              {isConnected ? <KycBadge {...kyc} /> : <div className="badge badge--warn">⚠️ Wallet non connecté</div>}
-            </div>
+          {txError && (
+            <p style={{ marginTop: 12 }}>
+              <span className="badge badge--danger">Erreur</span>{" "}
+              <span className="muted">{txError}</span>
+            </p>
+          )}
 
-            <div className="muted" style={{ marginTop: 10 }}>
-              Supply : {String(tokenInfo.totalSupply)} / {String(tokenInfo.maxSupply)}
-            </div>
+          {txHash && (
+            <p style={{ marginTop: 12 }}>
+              Preuve d’envoi (TX): <code>{txHash}</code>{" "}
+              <a
+                className="link"
+                href={`https://sepolia.etherscan.io/tx/${txHash}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Ouvrir ↗
+              </a>
+            </p>
+          )}
 
-            <div className="progress" style={{ marginTop: 10 }}>
-              <div className="progress__bar">
-                <div className="progress__fill" style={{ width: `${tokenInfo.progress}%` }} />
-              </div>
-              <div className="progress__meta">
-                <span>Avancement</span>
-                <span>{tokenInfo.progress}%</span>
-              </div>
-            </div>
+          <div style={{ marginTop: 12 }}>
+            <button
+              className="crystalBtn crystalBtn--gold"
+              type="button"
+              disabled={isPending || Boolean(willRevertReason)}
+              onClick={handleBuy}
+            >
+              <span className="crystalBtn__shimmer" />
+              <span style={{ position: "relative", zIndex: 2 }}>
+                {isPending ? "Envoi…" : "Acheter"}
+              </span>
+            </button>
 
-            {pricePerTokenEUR !== null && percentPerToken !== null && (
-              <div className="pill" style={{ marginTop: 12 }}>
-                1 token = <strong>{pricePerTokenEUR.toFixed(2)} €</strong> ≈{" "}
-                <strong>{percentPerToken.toFixed(4)}%</strong> du bien
-              </div>
-            )}
-
-            <div className="divider" />
-
-            {!isLinked && (
-              <div className="badge badge--danger">
-                Ce bien n’a pas encore de contrat de vente (HouseEthSale). Contacte l’administrateur.
-              </div>
-            )}
-
-            {isLinked && saleInfo?.readError && (
-              <div className="badge badge--danger">
-                Contrat de vente trouvé, mais lecture impossible (ABI / réseau).
-              </div>
-            )}
-
-            {isLinked && !saleInfo?.readError && (
-              <>
-                {!saleInfo?.saleActive && (
-                  <div className="badge badge--warn" style={{ marginBottom: 10 }}>
-                    Vente inactive (saleActive=false). L’admin/SPV doit activer la vente.
-                  </div>
-                )}
-
-                <form onSubmit={handleBuy} style={{ display: "grid", gap: 12 }}>
-                  <div>
-                    <label className="label">Nombre de parts (tokens)</label>
-                    <input
-                      className="input"
-                      type="number"
-                      min={String(minParts)}   // ✅ min parts pour atteindre 0.05 ETH
-                      step="1"
-                      value={tokenAmount}
-                      onChange={(e) => setTokenAmount(e.target.value)}
-                      placeholder={`Min: ${minParts}`}
-                    />
-                    <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                      Minimum d’investissement : <strong>0.05 ETH</strong> (≈ <strong>{minParts}</strong> token(s))
-                    </div>
-                  </div>
-
-                  {parts > 0 && saleInfo?.priceWeiPerToken > 0n && (
-                    <div className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>
-                      Tu achètes <strong>{parts}</strong> part(s).<br />
-                      Prix on-chain : <strong>{formatEther(saleInfo.priceWeiPerToken)} ETH</strong> / token.<br />
-                      Tu vas envoyer environ <strong>{requiredEthString} ETH</strong>.
-                    </div>
-                  )}
-
-                  <CrystalButton tone="gold" type="submit" disabled={isPending || !saleInfo?.saleActive}>
-                    {isPending ? "Transaction en cours…" : "Acheter des parts"}
-                  </CrystalButton>
-                </form>
-
-                {txHash && (
-                  <div style={{ marginTop: 12 }}>
-                    <div className="muted">
-                      TX : <code>{txHash}</code>
-                    </div>
-                    <a
-                      className="muted"
-                      style={{ textDecoration: "underline", textUnderlineOffset: 4 }}
-                      href={`https://sepolia.etherscan.io/tx/${txHash}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Ouvrir sur Etherscan ↗
-                    </a>
-                  </div>
-                )}
-              </>
-            )}
-
-            <div className="divider" />
-
-            <div className="muted" style={{ fontSize: 13 }}>
-              Contrat de vente : <code>{isLinked ? saleInfo?.saleContract : "Aucun"}</code>
-            </div>
-
-            {saleInfo?.priceWeiPerToken > 0n && (
-              <div className="muted" style={{ fontSize: 13, marginTop: 6 }}>
-                Prix : <strong>{formatEther(saleInfo.priceWeiPerToken)} ETH</strong> / token
-              </div>
+            {willRevertReason && (
+              <p className="muted" style={{ marginTop: 8 }}>
+                ℹ️ {willRevertReason}
+              </p>
             )}
           </div>
         </div>
