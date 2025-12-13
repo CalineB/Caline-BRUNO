@@ -74,7 +74,7 @@ export default function Header() {
 
           {isConnected ? (
             <>
-              <span className="badge">🟢 {shortAddr(address)}</span>
+              <span className="badge">🟢 {address}</span>
               <CrystalButton tone="blue" variant="ghost" type="button" onClick={() => disconnect()}>
                 Se déconnecter
               </CrystalButton>

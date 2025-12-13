@@ -12,6 +12,14 @@ import CrystalButton from "../components/CrystalButton.jsx";
 const TokenFactoryABI = TokenFactoryJSON.abi;
 const HouseTokenABI = HouseTokenJSON.abi;
 
+function safeParseJSON(str, fallback) {
+  try {
+    return JSON.parse(str ?? "");
+  } catch {
+    return fallback;
+  }
+}
+
 function riskClass(riskTier) {
   const r = String(riskTier || "").toLowerCase();
   if (r === "low") return "risk--low";
@@ -22,14 +30,18 @@ function riskClass(riskTier) {
 export default function Market() {
   const [houses, setHouses] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [metaVersion, setMetaVersion] = useState(0);
 
-  // ✅ IMPORTANT: lire metaMap via useMemo (sinon état figé + re-render pas propre)
   const metaMap = useMemo(() => {
-    try {
-      return JSON.parse(localStorage.getItem("propertyMeta") || "{}");
-    } catch {
-      return {};
+    return safeParseJSON(localStorage.getItem("propertyMeta") || "{}", {});
+  }, [metaVersion]);
+
+  useEffect(() => {
+    function onStorage(e) {
+      if (e.key === "propertyMeta") setMetaVersion((v) => v + 1);
     }
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   useEffect(() => {
@@ -56,11 +68,17 @@ export default function Market() {
             args: [i],
           });
 
-          const [name, symbol, totalSupply, maxSupply] = await Promise.all([
+          const [name, symbol, totalSupply, maxSupply, isActive] = await Promise.all([
             readContract(config, { address: tokenAddr, abi: HouseTokenABI, functionName: "name" }),
             readContract(config, { address: tokenAddr, abi: HouseTokenABI, functionName: "symbol" }),
             readContract(config, { address: tokenAddr, abi: HouseTokenABI, functionName: "totalSupply" }),
             readContract(config, { address: tokenAddr, abi: HouseTokenABI, functionName: "maxSupply" }),
+            readContract(config, {
+              address: CONTRACTS.tokenFactory,
+              abi: TokenFactoryABI,
+              functionName: "isActive",
+              args: [tokenAddr],
+            }),
           ]);
 
           const ts = BigInt(totalSupply ?? 0n);
@@ -78,10 +96,11 @@ export default function Market() {
             maxSupply: ms,
             progress,
             meta,
+            isActive: Boolean(isActive),
           });
         }
 
-        const published = list.filter((h) => h.meta && h.meta.published === true);
+        const published = list.filter((h) => h.meta && h.meta.published === true && h.isActive === true);
 
         if (!cancelled) setHouses(published);
       } catch (e) {
@@ -115,10 +134,12 @@ export default function Market() {
         <div className="card">
           <div className="card__body" style={{ textAlign: "center" }}>
             <h1>Biens disponibles</h1>
-            <p className="muted">Aucun bien n’est encore publié dans le market.</p>
-            <p className="muted" style={{ fontSize: ".95rem" }}>
-              Publie un bien depuis l’espace admin (bouton “📢 Publier dans le market”).
-            </p>
+            <p className="muted">Aucun bien n’est publié (ou ils sont inactifs).</p>
+            <div style={{ marginTop: 10 }}>
+              <button className="btn btn--ghost" onClick={() => setMetaVersion((v) => v + 1)} type="button">
+                🔄 Recharger propertyMeta
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -132,20 +153,18 @@ export default function Market() {
           <h1 className="catalogTitle">Biens disponibles</h1>
           <div className="catalogMeta">{houses.length} opportunité(s) publiées</div>
         </div>
-        <div className="muted">Catalogue • Security tokens • DeFi compliant</div>
+        <div className="muted">Catalogue • Security tokens</div>
       </div>
 
-      {/* ✅ IMPORTANT: on utilise TES classes (dark) -> plus de blanc sur blanc */}
       <div className="cards-grid">
         {houses.map((h) => {
           const meta = h.meta || {};
           const location = [meta.city, meta.country].filter(Boolean).join(", ");
           const price = meta.price ? Number(meta.price) : null;
 
-          // champs "luxe" (optionnels)
-          const targetYield = meta.yield ? Number(meta.yield) : null; // %
-          const maturity = meta.maturityMonths || meta.maturity || null; // months
-          const riskTier = meta.riskTier || meta.risk || "med"; // low/med/high
+          const targetYield = meta.yield ? Number(meta.yield) : null;
+          const maturity = meta.maturityMonths || meta.maturity || null;
+          const riskTier = meta.riskTier || meta.risk || "med";
 
           return (
             <article key={h.address} className="propertyCard">

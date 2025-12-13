@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useAccount, useWriteContract } from "wagmi";
 import { readContract } from "wagmi/actions";
-import { formatEther } from "viem";
+import { formatEther, parseEther } from "viem";
 
 import { config } from "../web3/wagmiConfig.js";
 import { CONTRACTS } from "../config/contracts.js";
@@ -137,6 +137,15 @@ export default function HouseDetail() {
 
   const isLinked = saleInfo?.saleContract && !isZeroAddress(saleInfo.saleContract);
 
+  // ✅ MIN INVEST 0.05 ETH (front)
+  const MIN_INVEST_WEI = parseEther("0.05");
+
+  // nb minimal de tokens pour atteindre 0.05 ETH (arrondi au-dessus)
+  const minParts =
+    saleInfo?.priceWeiPerToken && saleInfo.priceWeiPerToken > 0n
+      ? Number((MIN_INVEST_WEI + saleInfo.priceWeiPerToken - 1n) / saleInfo.priceWeiPerToken)
+      : 1;
+
   async function handleBuy(e) {
     e.preventDefault();
 
@@ -152,6 +161,11 @@ export default function HouseDetail() {
     if (!saleInfo?.saleActive) return alert("La vente n'est pas active. L’admin/SPV doit activer la vente.");
     if (!parts || parts <= 0) return alert("Choisis un nombre de parts (>= 1).");
     if (!saleInfo?.priceWeiPerToken || saleInfo.priceWeiPerToken <= 0n) return alert("Prix on-chain invalide.");
+
+    // ✅ minimum 0.05 ETH (UX)
+    if (requiredWei < MIN_INVEST_WEI) {
+      return alert(`Montant minimum : 0.05 ETH (≈ ${minParts} token(s) minimum).`);
+    }
 
     try {
       const tx = await writeContract({
@@ -309,18 +323,11 @@ export default function HouseDetail() {
         </div>
 
         {/* ------------ COLONNE DROITE ------------ */}
-        <div
-          className="card"
-          style={{ position: "sticky", top: 92, alignSelf: "start" }}
-        >
+        <div className="card" style={{ position: "sticky", top: 92, alignSelf: "start" }}>
           <div className="card__body">
             <div className="flex between">
               <h2 style={{ margin: 0 }}>Investir</h2>
-              {isConnected ? (
-                <KycBadge {...kyc} />
-              ) : (
-                <div className="badge badge--warn">⚠️ Wallet non connecté</div>
-              )}
+              {isConnected ? <KycBadge {...kyc} /> : <div className="badge badge--warn">⚠️ Wallet non connecté</div>}
             </div>
 
             <div className="muted" style={{ marginTop: 10 }}>
@@ -372,12 +379,15 @@ export default function HouseDetail() {
                     <input
                       className="input"
                       type="number"
-                      min="1"
+                      min={String(minParts)}   // ✅ min parts pour atteindre 0.05 ETH
                       step="1"
                       value={tokenAmount}
                       onChange={(e) => setTokenAmount(e.target.value)}
-                      placeholder="Ex: 10"
+                      placeholder={`Min: ${minParts}`}
                     />
+                    <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                      Minimum d’investissement : <strong>0.05 ETH</strong> (≈ <strong>{minParts}</strong> token(s))
+                    </div>
                   </div>
 
                   {parts > 0 && saleInfo?.priceWeiPerToken > 0n && (
@@ -415,8 +425,7 @@ export default function HouseDetail() {
             <div className="divider" />
 
             <div className="muted" style={{ fontSize: 13 }}>
-              Contrat de vente :{" "}
-              <code>{isLinked ? saleInfo?.saleContract : "Aucun"}</code>
+              Contrat de vente : <code>{isLinked ? saleInfo?.saleContract : "Aucun"}</code>
             </div>
 
             {saleInfo?.priceWeiPerToken > 0n && (
