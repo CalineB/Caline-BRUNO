@@ -7,36 +7,39 @@ describe("HouseSecurityToken", function () {
   let investor1;
   let investor2;
   let notKYC;
-  let IdentityRegistry;
   let registry;
-  let Token;
   let token;
 
   beforeEach(async function () {
     [deployer, projectOwner, investor1, investor2, notKYC] =
       await ethers.getSigners();
 
-    IdentityRegistry = await ethers.getContractFactory("IdentityRegistry");
+    const IdentityRegistry = await ethers.getContractFactory("IdentityRegistry");
     registry = await IdentityRegistry.deploy(deployer.address);
+    await registry.waitForDeployment();
 
     await registry.verifyInvestor(investor1.address);
     await registry.verifyInvestor(investor2.address);
 
-    Token = await ethers.getContractFactory("HouseSecurityToken");
+    const Token = await ethers.getContractFactory("HouseSecurityToken");
     token = await Token.deploy(
-      deployer.address,
+      deployer.address,         // platform owner = owner()
       projectOwner.address,
       "Maison Paris 7% 2030",
       "MP7-30",
       100,
       await registry.getAddress()
     );
+    await token.waitForDeployment();
   });
 
-  //        TESTS DU TOKEN
-
-  it("mint autorisé pour projectOwner ou plateforme", async function () {
+  it("mint autorisé pour projectOwner", async function () {
     await token.connect(projectOwner).mint(investor1.address, 10);
+    expect(await token.balanceOf(investor1.address)).to.equal(10);
+  });
+
+  it("mint autorisé pour la plateforme (owner)", async function () {
+    await token.connect(deployer).mint(investor1.address, 10);
     expect(await token.balanceOf(investor1.address)).to.equal(10);
   });
 
@@ -66,15 +69,12 @@ describe("HouseSecurityToken", function () {
   it("pause bloque les transferts", async function () {
     await token.connect(projectOwner).mint(investor1.address, 10);
 
-    await token.pause();
+    await token.connect(deployer).pause(); // ✅ onlyOwner = platform owner
 
     await expect(
       token.connect(investor1).transfer(investor2.address, 1)
     ).to.be.revertedWith("Token: transfers paused");
   });
-
-
-  //          INVESTOR CAP 20%
 
   describe("Investor cap (20%)", function () {
     it("revert si un investisseur dépasse le cap de 20% lors du mint", async function () {
@@ -87,7 +87,6 @@ describe("HouseSecurityToken", function () {
 
     it("revert si un investisseur dépasse 20% via un transfert secondaire", async function () {
       await token.connect(projectOwner).mint(investor1.address, 20);
-
       await token.connect(projectOwner).mint(investor2.address, 10);
 
       await expect(
@@ -95,5 +94,4 @@ describe("HouseSecurityToken", function () {
       ).to.be.revertedWith("Token: exceeds 20% investor cap");
     });
   });
-
 });

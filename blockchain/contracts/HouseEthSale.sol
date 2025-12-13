@@ -24,9 +24,12 @@ contract HouseEthSale is Ownable, ReentrancyGuard {
     uint256 public priceWeiPerToken;
     address public projectOwner;
     bool public saleActive;
+
     uint256 public totalEthRaised;
     mapping(address => uint256) public ethContributed;
 
+    // ✅ Minimum investissement
+    uint256 public constant MIN_INVEST_WEI = 0.05 ether;
 
     event TokensPurchased(address indexed buyer, uint256 ethPaid, uint256 tokensMinted);
     event SaleActivated();
@@ -77,11 +80,16 @@ contract HouseEthSale is Ownable, ReentrancyGuard {
         require(saleActive, "Sale: not active");
         require(msg.value > 0, "Sale: no ETH sent");
 
+        // ✅ Minimum 0.05 ETH
+        require(msg.value >= MIN_INVEST_WEI, "Sale: min 0.05 ETH");
+
+        // KYC obligatoire
         require(identityRegistry.isVerified(msg.sender), "Sale: wallet not KYC");
 
         uint256 tokensToMint = msg.value / priceWeiPerToken;
         require(tokensToMint > 0, "Sale: ETH amount too low for 1 token");
 
+        // Le cap 20% est check dans token.mint()
         token.mint(msg.sender, tokensToMint);
 
         uint256 totalCost = tokensToMint * priceWeiPerToken;
@@ -112,13 +120,8 @@ contract HouseEthSale is Ownable, ReentrancyGuard {
         return address(this).balance;
     }
 
-    function getInvestorStats(address investor)
-        external
-        view
-        returns (uint256 ethPaid, uint256 tokensOwned)
-    {
+    function getInvestorStats(address investor) external view returns (uint256 ethPaid, uint256 tokensOwned) {
         ethPaid = ethContributed[investor];
         tokensOwned = token.balanceOf(investor);
     }
-
 }

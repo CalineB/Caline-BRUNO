@@ -10,6 +10,8 @@ contract HouseSecurityToken is Ownable {
     string public name;
     string public symbol;
     uint8 public constant decimals = 0;
+
+    // Cap investor
     uint256 public constant MAX_INVESTOR_PERCENT = 20;
 
     // Supply
@@ -23,6 +25,7 @@ contract HouseSecurityToken is Ownable {
     address public factory;
     address public saleContract;
     address public saleFactory;
+
     // KYC registry
     IIdentityRegistry public identityRegistry;
 
@@ -36,14 +39,12 @@ contract HouseSecurityToken is Ownable {
     event Paused(address indexed by);
     event Unpaused(address indexed by);
     event SaleContractUpdated(address indexed oldSale, address indexed newSale);
-    event SaleFactoryUpdated(address indexed oldFactory, address indexed newFactory); // 🔥 AJOUT
+    event SaleFactoryUpdated(address indexed oldFactory, address indexed newFactory);
 
     // Modifiers
     modifier onlyProjectOrPlatformOrSale() {
         require(
-            msg.sender == projectOwner ||
-                msg.sender == owner ||
-                msg.sender == saleContract,
+            msg.sender == projectOwner || msg.sender == owner || msg.sender == saleContract,
             "Token: caller not authorized"
         );
         _;
@@ -101,21 +102,14 @@ contract HouseSecurityToken is Ownable {
 
     function _checkMaxSupply(uint256 amount) internal view {
         if (maxSupply != 0) {
-            require(
-                totalSupply + amount <= maxSupply,
-                "Token: maxSupply exceeded"
-            );
+            require(totalSupply + amount <= maxSupply, "Token: maxSupply exceeded");
         }
     }
 
     function _checkInvestorCap(uint256 newBalance) internal view {
         if (maxSupply == 0) return;
         uint256 maxAllowed = (maxSupply * MAX_INVESTOR_PERCENT) / 100;
-
-        require(
-            newBalance <= maxAllowed,
-            "Token: exceeds 20% investor cap"
-        );
+        require(newBalance <= maxAllowed, "Token: exceeds 20% investor cap");
     }
 
     // Admin functions
@@ -130,10 +124,7 @@ contract HouseSecurityToken is Ownable {
     }
 
     // Mint / Burn
-    function mint(address to, uint256 amount)
-        external
-        onlyProjectOrPlatformOrSale
-    {
+    function mint(address to, uint256 amount) external onlyProjectOrPlatformOrSale {
         require(to != address(0), "Token: mint to zero");
         require(amount > 0, "Token: amount zero");
 
@@ -148,10 +139,7 @@ contract HouseSecurityToken is Ownable {
         emit Transfer(address(0), to, amount);
     }
 
-    function burn(address from, uint256 amount)
-        external
-        onlyProjectOrPlatformOrSale
-    {
+    function burn(address from, uint256 amount) external onlyProjectOrPlatformOrSale {
         require(from != address(0), "Token: burn from zero");
         require(balanceOf[from] >= amount, "Token: insufficient balance");
 
@@ -163,11 +151,7 @@ contract HouseSecurityToken is Ownable {
     }
 
     // Transfer
-    function transfer(address to, uint256 amount)
-        external
-        whenNotPaused
-        returns (bool)
-    {
+    function transfer(address to, uint256 amount) external whenNotPaused returns (bool) {
         address from = msg.sender;
 
         require(to != address(0), "Token: transfer to zero");
