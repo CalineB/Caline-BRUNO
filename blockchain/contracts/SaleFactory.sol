@@ -24,7 +24,6 @@ contract SaleFactory is Ownable {
     }
 
     // Crée un contrat de vente HouseEthSale pour un token donné
-    // et le branche automatiquement via setSaleContract.
     function createSaleForToken(
         address tokenAddr,
         address projectOwner,

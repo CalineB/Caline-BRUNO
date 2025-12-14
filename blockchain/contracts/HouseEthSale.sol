@@ -80,10 +80,8 @@ contract HouseEthSale is Ownable, ReentrancyGuard {
         require(saleActive, "Sale: not active");
         require(msg.value > 0, "Sale: no ETH sent");
 
-        // ✅ Minimum 0.05 ETH
         require(msg.value >= MIN_INVEST_WEI, "Sale: min 0.05 ETH");
 
-        // KYC obligatoire
         require(identityRegistry.isVerified(msg.sender), "Sale: wallet not KYC");
 
         uint256 tokensToMint = msg.value / priceWeiPerToken;

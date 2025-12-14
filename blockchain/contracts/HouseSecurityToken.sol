@@ -4,9 +4,7 @@ pragma solidity ^0.8.17;
 import "./Ownable.sol";
 import "./IdentityRegistry.sol";
 
-// Token de sécurité pour un projet immobilier
 contract HouseSecurityToken is Ownable {
-    // Token metadata
     string public name;
     string public symbol;
     uint8 public constant decimals = 0;
@@ -14,7 +12,6 @@ contract HouseSecurityToken is Ownable {
     // Cap investor
     uint256 public constant MAX_INVESTOR_PERCENT = 20;
 
-    // Supply
     uint256 public totalSupply;
     uint256 public maxSupply;
 
@@ -26,7 +23,6 @@ contract HouseSecurityToken is Ownable {
     address public saleContract;
     address public saleFactory;
 
-    // KYC registry
     IIdentityRegistry public identityRegistry;
 
     // Pause mechanism

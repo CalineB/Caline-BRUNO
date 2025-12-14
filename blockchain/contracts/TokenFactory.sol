@@ -66,7 +66,6 @@ contract TokenFactory is Ownable {
 
         tokenAddress = address(token);
 
-        // dit au token "ta saleFactory c'est X"
         if (saleFactory != address(0)) {
             token.setSaleFactory(saleFactory);
         }
@@ -74,7 +73,6 @@ contract TokenFactory is Ownable {
         allHouseTokens.push(tokenAddress);
         tokensByProjectOwner[projectOwner].push(tokenAddress);
 
-        // ✅ register + active by default
         isHouseToken[tokenAddress] = true;
         isActive[tokenAddress] = true;
 
