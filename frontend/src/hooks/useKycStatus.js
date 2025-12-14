@@ -1,4 +1,3 @@
-// src/hooks/useKycStatus.js
 import { useMemo } from "react";
 import { useAccount, useReadContract } from "wagmi";
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { ethers } from "ethers";
-import { ADDRESSES, ABIS, NETWORK_ID } from "../config/contracts";
+import { ADDRESSES, ABIS } from "../config/contracts";
 
 export function useWeb3() {
   const [provider, setProvider] = useState(null);
